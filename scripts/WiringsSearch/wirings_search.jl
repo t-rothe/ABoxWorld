@@ -1,6 +1,34 @@
 using LinearAlgebra
 using TensorOperations
 using Distances
+using Parameters
+using Dates
+
+#Print NamedTuples in a vertical way, rather than horizontal, for logging purposes
+Base.show(io::IO, nt::NamedTuple) = begin
+    print(io, "(")
+    isempty(nt) || print(io, "\n")
+    for (i, (key, val)) in enumerate(pairs(nt))
+        print(io, " ", key, " = ")
+        show(io, val)
+        i != length(nt) && print(io, ",\n")
+    end
+    isempty(nt) || print(io, "\n")
+    print(io, ")")
+end
+
+function print2log(logmessage::String)
+    # current time
+    time = Dates.format(now(UTC), dateformat"yyyy-mm-dd HH:MM:SS")
+
+    # memory the process is using
+    maxrss = "$(round(Sys.maxrss()/1048576, digits=2)) MiB"
+
+    logdata = (;message=logmessage, # some super important progress update
+                maxrss) # lastly the amount of memory being used
+
+    @info savename(time, logdata; connector=" | ", equals=" = ", sort=false, digits=2)
+end
 
 function Compute_Coeff(P1::Array{Float64,4}, P2::Array{Float64,4}, P3::Array{Float64,4}, alt_G_score_val::Real, CHSH_score_val::Real, alt_Game_score::Function) # P1, P2, P3 are 2x2x2x2 tensors
     A = [alt_Game_score(P1) alt_Game_score(P2) alt_Game_score(P3);
@@ -96,6 +124,7 @@ end
 
 
 
+## Uniform version:
 function greedy_sufficient_box_in_orbits(P::Array{Float64, 4}, W_vec::Vector{Float64}, max_wiring_order::Int, stopping_condition::Function)    
     """ If there is a notion of a "sufficiently good" box, then we can stop early; Not always neccesary to compute orbits up to max_wiring_order. """
     
@@ -123,6 +152,7 @@ function greedy_sufficient_box_in_orbits(P::Array{Float64, 4}, W_vec::Vector{Flo
 
     end
 end
+
 
 
 
@@ -159,7 +189,7 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
            
            IC_viol_wired_box, viol_wiring_order = greedy_sufficient_box_in_orbits(initial_box, c_extremal_wires, max_wiring_order, IC_violation_criterion)
            if !ismissing(IC_viol_wired_box)
-               @info "Found IC-violating uniformly wired box at order $viol_wiring_order"
+               print2log("Found IC-violating uniformly wired box at order $viol_wiring_order")
                push!(IC_violating_wirings, (initial_box=initial_box, wired_box=IC_viol_wired_box, wiring_types=c_extremal_wiring_types, wiring_params=c_extremal_wiring_params_pair, wiring_order=viol_wiring_order))
            end
        end
@@ -167,3 +197,96 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
    return IC_violating_wirings
 end
 
+
+
+
+function select_best_wiring(current_best::Union{NamedTuple, Missing}, candidate::NamedTuple)
+    """Accompying utility function for greedy_lifting_extremal_wiring_search
+    Tuples contain (Wiring NamedTuple, CHSH_val, scoring_function_val)
+    Wirings NamedTuple features types, params, associativity
+    """
+    if ismissing(current_best) #If no current best
+        return candidate
+    elseif ismissing(candidate.score)
+        return current_best
+    elseif ismissing(current_best.score)
+        return candidate
+    elseif candidate.chsh > current_best.chsh
+        return candidate
+    else
+        return current_best
+    end
+end
+
+
+function greedy_lifting_extremal_wiring_search(initial_box::Array{Float64,4}, max_wiring_order::Int, stopping_condition::Function, scoring_functional::Function)
+    """...
+    Scoring functional (/distance metric) w.r.t. quantum set: defines at each (non-uniform) wiring order which wiring is best for subsequent wiring orders = greedy search.
+    If  by CHSH value.
+    """
+
+    if stopping_condition(initial_box) #0-th order orbit is already good enough
+        print2log("Found *unwired* IC-violating box. This is unexpected; Is the box search space correctly specified?")
+        return (initial_box=initial_box, wired_box=initial_box, wiring_series=[missing, ], wiring_order=0)   
+    end
+    # Look at all possible ways to multiply P with itself via W:
+    Qs = (initial_box, initial_box, initial_box) #Qright, Qcenter, Qleft
+    
+    associativities = [:R, :C, :L]
+    best_wirings = Any[missing,] #Stores at each order (NamedTuple(types=types_tuple, params=params_tuple, associativity ∈ (:R, :C, :L)), CHSH_val, scoring_function_val)
+    for c_order in 1:max_wiring_order
+        push!(best_wirings, missing)
+        for c_extremal_wiring_types in Iterators.product(keys(extremal_wiring_params), keys(extremal_wiring_params))
+            for c_extremal_wiring_params_pair in Iterators.product(Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[1]]))...), Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[2]]))...))
+                
+                c_W = reshape(extremal_wires_dict[(c_extremal_wiring_types[1], c_extremal_wiring_params_pair[1], c_extremal_wiring_types[2], c_extremal_wiring_params_pair[2])], :,1)  #Put in (32,1) matrix bec. of the nature of the tensorized boxproduct, W must be in batched form
+                Q_candidates = (reduc_BoxProduct(c_W, Qs[1], initial_box), reduc_BoxProduct(c_W, Qs[2], Qs[2]), reduc_BoxProduct(c_W, initial_box, Qs[3]))  #Qright, Qcenter, Qleft
+                
+                sufficient_box_inds = findall(stopping_condition, Q_candidates)
+                if !isempty(sufficient_box_inds)
+                    sufficient_idx = sufficient_box_inds[1] #Just take the first one, i.e. prefer right multiplication = highest CHSH value
+                    sufficient_box = Q_candidates[sufficient_idx]
+                    print2log("Found IC-violating wired box at order $c_order")
+                    found_wiring_series = [[best_wirings[i][1] for i in 1:(c_order-1)]; [(types=c_extremal_wiring_types, params=c_extremal_wiring_params_pair, associatity=associativities[sufficient_idx]), ]]
+                    return (initial_box=initial_box, wired_box=sufficient_box, wiring_series=found_wiring_series, wiring_order=c_order)
+                end
+
+                # We have not found a sufficient box for this wiring and order, so update best wiring
+                chsh_scores = [CHSH_score(Q_candidate) for Q_candidate in Q_candidates]
+                non_quantum_Q_inds = findall(!sdp_conditions.is_in_NPA, Q_candidates)
+                
+                #Determine best associativity of wiring
+                if isempty(non_quantum_Q_inds) #all quantum -> CHSH determines best
+                    (max_chsh_val, max_chsh_box_idx) = findmax(chsh_scores)   
+                    wiring_candidate = (wiring=(types=c_extremal_wiring_types, params=c_extremal_wiring_params_pair, associativity=associativities[max_chsh_box_idx]), chsh=max_chsh_val, score=missing)
+                    best_wirings[c_order] = select_best_wiring(best_wirings[c_order], wiring_candidate)
+                
+                elseif length(non_quantum_Q_inds) == 1
+                    wiring_candidate = (wiring=(types=c_extremal_wiring_types, params=c_extremal_wiring_params_pair, associativity=associativities[non_quantum_Q_inds[1]]), chsh=chsh_scores[non_quantum_Q_inds[1]], score=missing)
+                    best_wirings[c_order] = select_best_wiring(best_wirings[c_order], wiring_candidate)
+
+                else #-> scoring function decides if more than one non-quantum Q candidate
+                    print2log("Since we got post-quantum CHSH values $(chsh_scores), we need to use scoring function to decide. This will take a while ...")
+                    non_quantum_Q_candidates = [Q_candidates[i] for i in non_quantum_Q_inds]
+                    (max_score_val, max_score_idx) = findmax(scoring_functional, non_quantum_Q_candidates)   
+                    max_score_original_idx = non_quantum_Q_inds[max_score_idx]
+                    wiring_candidate = (wiring=(types=c_extremal_wiring_types, params=c_extremal_wiring_params_pair, associativity=associativities[max_score_original_idx]), chsh=chsh_scores[max_score_original_idx], score=max_score_val)
+                    best_wirings[c_order] = select_best_wiring(best_wirings[c_order], wiring_candidate)
+                end
+            end
+        end
+        print2log("Finished wiring order $c_order ; Nothing found yet. Best series of wirings so far:")
+        for i in 1:c_order
+            @info best_wirings[i]
+        end
+
+        #Prepare Qs for next order
+        best_types, best_params = best_wirings[c_order][1].types, best_wirings[c_order][1].params
+        best_W = reshape(extremal_wires_dict[(best_types[1], best_params[1], best_types[2], best_params[2])], :,1) 
+        newQs = (reduc_BoxProduct(best_W, Qs[1], initial_box), reduc_BoxProduct(best_W, Qs[2], Qs[2]), reduc_BoxProduct(best_W, initial_box, Qs[3]))  #Qright, Qcenter, Qleft
+        Qs = newQs # overwrite
+    end
+    
+    #Found nothing, stopping after reaching max_wiring_order
+    return missing
+ end

@@ -17,7 +17,7 @@ module sdp_conditions
     #using ..QuantumNPA
     include("QuantumNPA/QuantumNPA.jl")
 
-    function is_in_NPA(FullNSJoint::Array{Float64,4}; level::Int, verbose=false)
+    function is_in_NPA(FullNSJoint::Array{Float64,4}; level::Int=3, verbose=false)
         Box = nsboxes.NSBox((2,2,2,2), FullNSJoint)
         PA = QuantumNPA.projector(1, 1:2, 1:2, full=true)
         PB = QuantumNPA.projector(2, 1:2, 1:2, full=true)
@@ -47,7 +47,7 @@ module sdp_conditions
     end
 
 
-    function is_in_fulljoint_NPA(FullNSJoint::Array{Float64,4}; level::Int, verbose=false)
+    function is_in_fulljoint_NPA(FullNSJoint::Array{Float64,4}; level::Int=3, verbose=false)
         
         PA = projector(1, 1:2, 1:2)
         PB = projector(2, 1:2, 1:2)
@@ -77,7 +77,7 @@ module sdp_conditions
     pyiter = pyimport("itertools")
     n2s = pyimport("ncpol2sdpa")
 
-    function is_in_pyNPA(p_obs::Array{Float64, 4}; level::Int, verbose=false)
+    function is_in_pyNPA(p_obs::Array{Float64, 4}; level::Int=2, verbose=false)
         P = n2s.Probability([2, 2], [2, 2])
         sdp = n2s.SdpRelaxation(P.get_all_operators(), verbose=false,
                                 parallel=true)
@@ -98,7 +98,7 @@ module sdp_conditions
     end
 
 
-    function is_asymp_in_pyNPA(p_obs::Array{Float64, 4}; level::Int, verbose=false)
+    function is_asymp_in_pyNPA(p_obs::Array{Float64, 4}; level::Int=2, verbose=false)
         λ = n2s.generate_variables("λ", 1)
         P = n2s.Probability([2, 2], [2, 2])
         sdp = n2s.SdpRelaxation(pylist([P.get_all_operators()..., λ[0]]), verbose=false,
@@ -161,13 +161,13 @@ module sdp_conditions
         end
     end
 
-    function min_distance_to_pyNPA(p_obs::Array{Float64, 4}; level::Int, verbose=false, solver="mosek")
+    function min_distance_to_pyNPA(p_obs::Array{Float64, 4}; level::Int=2, verbose=false, solver="mosek")
         solved_sdp, _ = optimize_distance_to_pyNPA(p_obs; level=level, verbose=verbose, solver=solver)
         
         return pyconvert(Float64, solved_sdp.primal)
     end
 
-    function nearest_pyNPA_point(p_obs::Array{Float64, 4}; level::Int, verbose=false, solver="mosek")
+    function nearest_pyNPA_point(p_obs::Array{Float64, 4}; level::Int=2, verbose=false, solver="mosek")
         solved_sdp, sdp_vars = optimize_distance_to_pyNPA(p_obs; level=level, verbose=verbose, solver=solver)
         
         P_sol = Array{Float64}(undef, 2, 2, 2, 2)

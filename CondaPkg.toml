@@ -1,0 +1,6 @@
+[deps]
+numpy = ""
+
+[pip.deps]
+torch = ""
+ncpol2sdpa = ""

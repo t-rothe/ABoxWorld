@@ -61,7 +61,7 @@ c_config = WiringsSliceSearchConfig(mode=:greedy_lifting, #:uniform, #
                                 boundary_precision=4e-3,
                                 search_precision=4e-3,
                                 precision=1.4e-2,
-                                max_wiring_order=2,
+                                max_wiring_order=8,
                                 )
     
 data_output = Wirings_Slice_Search(c_config; verbose=true)

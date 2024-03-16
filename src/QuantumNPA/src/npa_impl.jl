@@ -278,6 +278,9 @@ function npa_opt(expr, level_or_moments;
 
     optimize!(model)
 
+    if verbose && !is_solved_and_feasible(model)
+        @warn "Optimisation problem infeasible."
+    end
     return objective_value(model)
 end
 

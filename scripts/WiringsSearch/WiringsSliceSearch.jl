@@ -3,7 +3,7 @@ include(scriptsdir("WiringsSearch", "wirings_search.jl"))
 
 
 @with_kw struct WiringsSliceSearchConfig
-    mode::Symbol; @assert mode in [:uniform, :greedy_lifting]
+    mode::Symbol; @assert mode in [:uniform, :greedy_lifting, :collect_plot_data]
     box_search_space::Symbol; @assert box_search_space in [:mid_mid_point, :full_IC_Q_gap]
     Box1::Pair{String, Array{Float64,4}}
     Box2::Pair{String, Array{Float64,4}}
@@ -18,7 +18,7 @@ end
 
 #Adapt savename() for WiringsSliceSearchConfig:
 DrWatson.default_prefix(c::WiringsSliceSearchConfig) = string(c.mode)*"_WiringsSliceSearch_"*string(c.box_search_space)*"_"*c.Box1.first*"_"*c.Box2.first*"_"*c.Box3.first*"_MaxOrder_"*string(c.max_wiring_order)
-DrWatson.allaccess(::WiringsSliceSearchConfig) = Tuple()
+DrWatson.allaccess(::WiringsSliceSearchConfig) = tuple()
 
 
 function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=false)
@@ -89,8 +89,8 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
                     c_CHSH_score_val += config.boundary_precision #Stay at same x-point, but go up along y-axis
                 else 
                     #Accept that we're at the boundary of the NS region and move on to the next x-point
-                    push!(results["unwired_IC_primary_scores"], missing) #Add the NS boundary point to the list
-                    #push!(results["unwired_IC_primary_scores"], algebraic_max_CHSH_score - c_secondary_score_val + min_secondary_score) #Add the NS boundary point to the list
+                    #push!(results["unwired_IC_primary_scores"], missing) #Add the NS boundary point to the list
+                    push!(results["unwired_IC_primary_scores"], algebraic_max_CHSH_score - c_secondary_score_val + min_secondary_score) #Add the NS boundary point to the list
                     c_CHSH_score_val = (algebraic_max_CHSH_score - max(x2, x3))*(c_secondary_score_val-min(x2, x3))/(max(x2, x3)-min(x2, x3)) + init_CHSH_guess*(c_secondary_score_val-max(x2, x3))/(min(x2,x3)-max(x2, x3)) # Lagrange interpolation; Same as in comment above
                     break
                 end
@@ -123,18 +123,19 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
         end
 
     elseif config.box_search_space == :full_IC_Q_gap
-        safety_margin = 2 #units of search_precision
+        safety_margin = 4 #units of boundary_precision
 
+        config.mode == :collect_plot_data && (results["assessed_points"] = [])
         #Iterate over all points in the IC-Q gap with a certain resolution
         for (c_x_idx, c_x_val) in enumerate(results["quantum_secondary_scores"])
             
-            if (results["unwired_IC_primary_scores"][c_x_idx] - results["quantum_primary_scores"][c_x_idx]) <= (2*safety_margin+1)*config.search_precision #Minimal gap width of 2 x safety margin + more than one unit of search precision 
+            if mod(c_x_idx, Int(floor(config.search_precision/config.boundary_precision))) != 0 || (results["unwired_IC_primary_scores"][c_x_idx] - results["quantum_primary_scores"][c_x_idx]) <= (2*safety_margin+1)*config.boundary_precision #Minimal gap width of 2 x safety margin + more than one unit of search precision 
                 continue #IC-Q gap needs to be wide enough to avoid false positives by numerical errors
             end
 
             n_results_before_this_x = length(results["IC_violating_wirings"])
                     
-            for c_y_val in range(start=(results["quantum_primary_scores"][c_x_idx] + safety_margin*config.search_precision), step=config.search_precision, stop=(results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.search_precision))
+            for c_y_val in range(start=(results["quantum_primary_scores"][c_x_idx] + safety_margin*config.boundary_precision), step=config.search_precision, stop=(results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.boundary_precision))
                 print2log("Searching for a Uniform wiring at x=$(round(c_x_val, digits=3)) and y=$(round(c_y_val, digits=3))...")
 
                 c_fixed_α, c_fixed_β, c_fixed_γ = Compute_Coeff(P1, P2, P3, c_x_val, c_y_val, secondary_score)
@@ -144,6 +145,8 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
                     append!(results["IC_violating_wirings"], uniform_extremal_wiring_search(c_fixed_nl_box, config.max_wiring_order, is_NOT_in_IC))
                 elseif config.mode == :greedy_lifting
                     push!(results["IC_violating_wirings"], greedy_lifting_extremal_wiring_search(c_fixed_nl_box, config.max_wiring_order, is_NOT_in_IC, sdp_conditions.nearest_pyNPA_point ))
+                elseif config.mode == :collect_plot_data
+                    push!(results["assessed_points"], (c_x_val, c_y_val))
                 else
                     error("Unknown mode")
                 end

@@ -36,39 +36,93 @@ module sdp_conditions
         #    set_attribute(j_mo, "INTPNT_CO_TOL_DFEAS", 1e-7)
         #end
 
-        #optimize!(j_mo)
 
-        #if is_solved_and_feasible(j_mo)
-        #    return true
-        #else
-        #    return false
-        #end
         return QuantumNPA.npa_max(1*QuantumNPA.Id, level; eq=constraints, solver=Mosek.Optimizer) > 0.0
     end
 
 
-    function is_in_fulljoint_NPA(FullNSJoint::Array{Float64,4}; level::Int=3, verbose=false)
-        
-        PA = projector(1, 1:2, 1:2)
-        PB = projector(2, 1:2, 1:2)
-
-        constraints = [PA[i,k]*PB[j,l] - FullNSJoint[i,j,k,l]*Id for (i,j, k, l) in Iterators.product(1:2, 1:2, 1:2, 1:2)]            
-        
-        j_mo, j_vars = npa2jump(1e-4*QuantumNPA.Id, level; eq=constraints, solver=Mosek.Optimizer, return_vars=true)
-
-        if !verbose
-            set_attribute(j_mo, "QUIET", true)
-            set_attribute(j_mo, "INTPNT_CO_TOL_DFEAS", 1e-7)
+    function is_asymp_in_NPA(FullNSJoint::Array{Float64,4}; level::Int, ϵ=eps(Float32), verbose=false)
+        function npa_test(λ)
+            PA = QuantumNPA.projector(1, 1:2, 1:2, full=true)
+            PB = QuantumNPA.projector(2, 1:2, 1:2, full=true)
+    
+            Box = nsboxes.NSBox((2,2,2,2), FullNSJoint)
+            
+            eq_constraints =  [PA[1,1] - (λ*Box.marginals_vec_A[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PA[1,2] - (λ*Box.marginals_vec_A[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PB[1,1] - (λ*Box.marginals_vec_B[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PB[1,2] - (λ*Box.marginals_vec_B[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                                (PA[1,i]*PB[1,j] - (λ*Box.joints_mat[i,j] + (1-λ)*0.25)*QuantumNPA.Id for (i,j) in Iterators.product(1:2, 1:2))...,
+                                ]
+           
+            return QuantumNPA.npa_max(λ*QuantumNPA.Id, level; eq=eq_constraints, solver=Mosek.Optimizer) >= λ - ϵ #>= 0.0
         end
+        
+        # Binary search on continuous variable λ
+        λ_interval = (0.0, 1.0)
+    
+        #First check endpoints:
+        #extreme_output = (test(λ_interval[1]), test(λ_interval[end]))
+        #if extreme_output == (true, true)
+        #    println("Both endpoints are feasible")
+        #    return false
+        #elseif extreme_output == (false, false)
+        #    println("Both endpoints are infeasible")
+        #    return false
+        #end
+        
+        c_λ_window = (λ_interval[1], λ_interval[end])
+        while c_λ_window[2] - c_λ_window[1] > ϵ
+            c_λ = (c_λ_window[1] + c_λ_window[2])/2
+            c_output = npa_test(c_λ)
+            c_λ_window = c_output ? (c_λ, c_λ_window[2]) : (c_λ_window[1], c_λ)
+        end
+        
+        return c_λ_window[2] == λ_interval[2] || c_λ_window[1] >= λ_interval[2] - ϵ
+    end
 
-        optimize!(j_mo)
-        if is_solved_and_feasible(j_mo)
-            return true
-            #return JuMP.value(λ) < 0.0 # 
+    function randomization_distance_to_NPA(FullNSJoint::Array{Float64,4}; level::Int, ϵ::AbstractFloat=eps(Float32), verbose=false)
+        """ !! Non-orthogonal !! distance to the NPA set. """
+        function npa_test(λ)
+            PA = QuantumNPA.projector(1, 1:2, 1:2, full=true)
+            PB = QuantumNPA.projector(2, 1:2, 1:2, full=true)
+    
+            Box = nsboxes.NSBox((2,2,2,2), FullNSJoint)
+            
+            eq_constraints =  [PA[1,1] - (λ*Box.marginals_vec_A[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PA[1,2] - (λ*Box.marginals_vec_A[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PB[1,1] - (λ*Box.marginals_vec_B[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                                PB[1,2] - (λ*Box.marginals_vec_B[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                                (PA[1,i]*PB[1,j] - (λ*Box.joints_mat[i,j] + (1-λ)*0.25)*QuantumNPA.Id for (i,j) in Iterators.product(1:2, 1:2))...,
+                                ]
+           
+            return QuantumNPA.npa_max(λ*QuantumNPA.Id, level; eq=eq_constraints, solver=Mosek.Optimizer) >= λ - ϵ #>= 0.0
+        end
+        
+        # Binary search on continuous variable λ
+        λ_interval = (0.0, 1.0)
+    
+        #First check endpoints:
+        #extreme_output = (npa_test(λ_interval[1]), npa_test(λ_interval[end]))
+        #if extreme_output[2] == true
+            #println("The point is in the NPA set; There is no distance to the NPA set")
+        #    return 0.0
+        #end
+        
+        c_λ_window = (λ_interval[1], λ_interval[end])
+        while c_λ_window[2] - c_λ_window[1] > ϵ
+            c_λ = (c_λ_window[1] + c_λ_window[2])/2
+            c_output = npa_test(c_λ)
+            c_λ_window = c_output ? (c_λ, c_λ_window[2]) : (c_λ_window[1], c_λ)
+        end
+        
+        if c_λ_window[2] == λ_interval[2]
+            return 0.0
         else
-            return false
+            return λ_interval[2] - (c_λ_window[1] + c_λ_window[2])/2
         end
     end
+
 
 
     #ncpol2sdpa.py based implementations:

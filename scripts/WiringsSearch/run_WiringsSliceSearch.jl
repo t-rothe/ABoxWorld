@@ -1,7 +1,11 @@
 
 using DrWatson
 @quickactivate "ABoxWorld"
+using Pkg; Pkg.instantiate()
+
 include(srcdir("ABoxWorld.jl"));
+
+@info "Project-name = $(projectname()), Julia Depot @ $DEPOT_PATH"
 
 using LinearAlgebra
 using TensorOperations

@@ -69,7 +69,10 @@ module nsboxes
     function NSBox(scenario::NTuple{4, <:Int}, marginals_vec_A::Vector{Float64}, marginals_vec_B::Vector{Float64}, joints_mat::Matrix{Float64})
         """Construct No-Signaling Box (::NSBox) in (M_A, M_B, m_A, m_B)-scenario from a Collins-Gisin representation (see NSBox definition)
         """
-
+        @assert length(marginals_vec_A) == scenario[1] * (scenario[3] - 1) "Marginals of A should have length M_A * (m_A - 1)"
+        @assert length(marginals_vec_B) == scenario[2] * (scenario[4] - 1) "Marginals of B should have length M_B * (m_B - 1)"
+        @assert size(joints_mat) == (scenario[1]*(scenario[3]-1), scenario[2]*(scenario[4]-1)) "Joint probabilities should have dimensions M_A * (m_A - 1) x M_B * (m_B - 1)"
+        
         return NSBox(scenario=scenario, marginals_vec_A=marginals_vec_A, marginals_vec_B=marginals_vec_B, joints_mat=joints_mat)
     end
 
@@ -102,18 +105,39 @@ module nsboxes
         return NSBox(scenario=scenario, marginals_vec_A=marginals_vec_A, marginals_vec_B=marginals_vec_B, joints_mat=reduced_joints_mat)
     end 
 
+    function Base.show(io::IO, nb::NSBox)
+        rounded_A_marginals = string.(round.(nb.marginals_vec_A, digits=4))
+        rounded_A_marginals = [elem*repeat("0", maximum(length.(rounded_A_marginals))-length(elem)) for elem in rounded_A_marginals]
+        
+        rounded_B_marginals = string.(round.(nb.marginals_vec_B, digits=4))
+        rounded_B_marginals = [elem*repeat("0", maximum(length.(rounded_B_marginals))-length(elem)) for elem in rounded_B_marginals]
+
+        rounded_joints_mat = string.(round.(nb.joints_mat, digits=4))
+
+        first_column_vec = rounded_A_marginals
+        remain_columns_vec = [" || " * join([elem*repeat("0", maximum(length.(rounded_B_marginals))-length(elem)) for elem in rounded_joints_mat[row_i, :]], " | ") * " ||" for row_i in 1:length(nb.marginals_vec_A)]
+        
+        first_line = repeat(" ", max(1, maximum(length.(first_column_vec)) + 1))*"|| " * join(rounded_B_marginals, " | ") * " ||"
+        println(io, first_line)
+        println(io, repeat("=", length(first_line)))
+        for row_i in 1:length(nb.marginals_vec_A)
+            println(io, first_column_vec[row_i] * remain_columns_vec[row_i])
+        end
+    end
+
     function Base.getindex(nsbox::NSBox, a::Int, b::Int, x::Int, y::Int)
         #@assert all((a,b,x,y) .!= 0) "Give 1-indexed indices, like for Julia arrays"
+        reshaped_joints_mat = permutedims(reshape(nsbox.joints_mat, (nsbox.scenario[3] - 1,nsbox.scenario[1],nsbox.scenario[4] - 1, nsbox.scenario[2] )), (1,3,2,4)) 
         if a != nsbox.scenario[3] && b != nsbox.scenario[4]
-            return nsbox.joints_mat[a,b,x,y]
+            return reshaped_joints_mat[a,b,x,y]
         elseif a == nsbox.scenario[3] && b != nsbox.scenario[4]
-            return (reshape(nsbox.marginals_vec_B, (1, nsbox.scenario[3] - 1, 1, nsbox.scenario[1]))[:,:,x,y] .- sum(nsbox.joints_mat[:,:,x,y], dims=1))[1,b] 
+            return (reshape(nsbox.marginals_vec_B, (1, nsbox.scenario[3] - 1, 1, nsbox.scenario[1]))[:,:,x,y] .- sum(reshaped_joints_mat[:,:,x,y], dims=1))[1,b] 
         elseif a != nsbox.scenario[3] && b == nsbox.scenario[4]
-            return (reshape(nsbox.marginals_vec_A, (nsbox.scenario[3] - 1, 1, nsbox.scenario[1], 1))[:,:,x,y] .- sum(nsbox.joints_mat[:,:,x,y], dims=2))[a,1] 
+            return (reshape(nsbox.marginals_vec_A, (nsbox.scenario[3] - 1, 1, nsbox.scenario[1], 1))[:,:,x,y] .- sum(reshaped_joints_mat[:,:,x,y], dims=2))[a,1] 
         else #a == nsbox.scenario[3] && b == nsbox.scenario[4]
-            Pa_at_last_b = reshape(nsbox.marginals_vec_A, (nsbox.scenario[3] - 1, 1, nsbox.scenario[1], 1))[:,:,x,y] .- sum(nsbox.joints_mat[:,:,x,y], dims=2) #P(a, b=d|x=x,y=y)
-            Pb_at_last_a = reshape(nsbox.marginals_vec_B, (1, nsbox.scenario[3] - 1, 1, nsbox.scenario[1]))[:,:,x,y] .- sum(nsbox.joints_mat[:,:,x,y], dims=1) #P(a=d, b|x=x,y=y)
-            return 1.0 .- (sum(nsbox.joints_mat[:,:,x,y], dims=(1,2)) .+ sum(Pb_at_last_a, dims=2) .+ sum(Pa_at_last_b, dims=1))
+            Pa_at_last_b = reshape(nsbox.marginals_vec_A, (nsbox.scenario[3] - 1, 1, nsbox.scenario[1], 1))[:,:,x,y] .- sum(reshaped_joints_mat[:,:,x,y], dims=2) #P(a, b=d|x=x,y=y)
+            Pb_at_last_a = reshape(nsbox.marginals_vec_B, (1, nsbox.scenario[3] - 1, 1, nsbox.scenario[1]))[:,:,x,y] .- sum(reshaped_joints_mat[:,:,x,y], dims=1) #P(a=d, b|x=x,y=y)
+            return 1.0 .- (sum(reshaped_joints_mat[:,:,x,y], dims=(1,2)) .+ sum(Pb_at_last_a, dims=2) .+ sum(Pa_at_last_b, dims=1))
         end
     end
 
@@ -212,7 +236,7 @@ module nsboxes
         for arg in args
             arg.first.scenario == a.first.scenario
         end
-        @assert abs(a.second + b.second + sum(arg.second for arg in args) - 1.0) < global_eps_tol
+        @assert abs(a.second + b.second + sum(arg.second for arg in args) - 1.0) < global_eps_tol "Deviation from 1.0: $(a.second + b.second + sum(arg.second for arg in args))"
         
         mixed_marginals_vec_A = a.second * a.first.marginals_vec_A + b.second * b.first.marginals_vec_A + reduce(+, arg.second * arg.first.marginals_vec_A for arg in args)
         mixed_marginals_vec_B = a.second * a.first.marginals_vec_B + b.second * b.first.marginals_vec_B + reduce(+, arg.second * arg.first.marginals_vec_B for arg in args)

@@ -4,7 +4,7 @@ include(scriptsdir("WiringsSearch", "wirings_search.jl"))
 
 @with_kw struct WiringsSliceSearchConfig
     mode::Symbol; @assert mode in [:uniform, :greedy_lifting, :collect_plot_data]
-    box_search_space::Symbol; @assert box_search_space in [:mid_mid_point, :full_IC_Q_gap]
+    box_search_space::Symbol; @assert box_search_space in [:mid_mid_point, :full_IC_Q_gap, :below_IC_boundary]
     Box1::Pair{String, Array{Float64,4}}
     Box2::Pair{String, Array{Float64,4}}
     Box3::Pair{String, Array{Float64,4}}
@@ -19,6 +19,34 @@ end
 #Adapt savename() for WiringsSliceSearchConfig:
 DrWatson.default_prefix(c::WiringsSliceSearchConfig) = string(c.mode)*"_WiringsSliceSearch_"*string(c.box_search_space)*"_"*c.Box1.first*"_"*c.Box2.first*"_"*c.Box3.first*"_MaxOrder_"*string(c.max_wiring_order)
 DrWatson.allaccess(::WiringsSliceSearchConfig) = tuple()
+
+
+function Base.show(io::IO, p::WiringsSliceSearchConfig)
+    println(io, "WiringsSliceSearchConfig:")
+    for field_key in fieldnames(WiringsSliceSearchConfig)
+        println(io, "  ", field_key, ": ", getfield(p, field_key))
+    end 
+end
+
+
+
+function search_at_fixed_point(fixed_primary_score_val::Float64, fixed_secondary_score_val::Float64, Box1::Array{Float64, 4}, Box2::Array{Float64, 4}, Box3::Array{Float64, 4}, secondary_score::Function, wiring_search_mode::Symbol, max_wiring_order::Int, IC_violation_criterion::Function)
+    fixed_α, fixed_β, fixed_γ = Compute_Coeff(Box1, Box2, Box3, fixed_primary_score_val, fixed_secondary_score_val, secondary_score)
+    fixed_nl_box = fixed_α*Box1 + fixed_β*Box2 + fixed_γ*Box3
+
+    if wiring_search_mode == :uniform
+        #Here we are also interested if we can find multiple, different violating wirings = append!
+        return uniform_extremal_wiring_search(fixed_nl_box, max_wiring_order, IC_violation_criterion)
+    elseif wiring_search_mode == :greedy_lifting
+        #Here we only care about whether any violating wiring exists = push!
+        #distance_metric = sdp_conditions.min_distance_to_pyNPA 
+        distance_metric = sdp_conditions.randomization_distance_to_NPA
+        return greedy_lifting_extremal_wiring_search(fixed_nl_box, max_wiring_order, IC_violation_criterion, distance_metric)
+    else
+        error("Unknown wiring search mode")
+    end
+end
+
 
 
 function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=false)
@@ -98,6 +126,7 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
         end
     end
 
+
     # Search for IC-violating Uniformly wired boxes:
     print2log("Searching for IC-violating wirings...")
     results["IC_violating_wirings"] = Any[]
@@ -107,23 +136,15 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
         middle_points_IC_Q = results["quantum_primary_scores"] + (results["unwired_IC_primary_scores"] - results["quantum_primary_scores"]) ./ 2 
 
         fixed_nl_point = (results["unwired_IC_secondary_scores"][div(end,2)], middle_points_IC_Q[div(end,2)])
-        fixed_α, fixed_β, fixed_γ = Compute_Coeff(P1, P2, P3, fixed_nl_point[1], fixed_nl_point[2], secondary_score)
-        fixed_nl_box = fixed_α*P1 + fixed_β*P2 + fixed_γ*P3
-
-        #dist_metric = prepare_NPA_BoxDistance(initial_box)
-
-        if config.mode == :uniform
-            #Here we are also interested if we can find multiple, different violating wirings = append!
-            append!(results["IC_violating_wirings"], uniform_extremal_wiring_search(fixed_nl_box, config.max_wiring_order, is_NOT_in_IC))
-        elseif config.mode == :greedy_lifting
-            #Here we only care about whether any violating wiring exists = push!
-            push!(results["IC_violating_wirings"], greedy_lifting_extremal_wiring_search(fixed_nl_box, config.max_wiring_order, is_NOT_in_IC, sdp_conditions.nearest_pyNPA_point ))
+        
+        if config.mode != :collect_plot_data
+            append!(results["IC_violating_wirings"], search_at_fixed_point(fixed_nl_point[1], fixed_nl_point[2], P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, is_NOT_in_IC))
         else
-            error("Unknown mode")
+            push!(results["assessed_points"], fixed_nl_point)
         end
 
     elseif config.box_search_space == :full_IC_Q_gap
-        safety_margin = 4 #units of boundary_precision
+        safety_margin = 2 #units of boundary_precision
 
         config.mode == :collect_plot_data && (results["assessed_points"] = [])
         #Iterate over all points in the IC-Q gap with a certain resolution
@@ -136,25 +157,48 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
             n_results_before_this_x = length(results["IC_violating_wirings"])
                     
             for c_y_val in range(start=(results["quantum_primary_scores"][c_x_idx] + safety_margin*config.boundary_precision), step=config.search_precision, stop=(results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.boundary_precision))
-                print2log("Searching for a Uniform wiring at x=$(round(c_x_val, digits=3)) and y=$(round(c_y_val, digits=3))...")
+                print2log("Searching for a wiring at x=$(round(c_x_val, digits=3)) and y=$(round(c_y_val, digits=3))...")
 
-                c_fixed_α, c_fixed_β, c_fixed_γ = Compute_Coeff(P1, P2, P3, c_x_val, c_y_val, secondary_score)
-                c_fixed_nl_box = c_fixed_α*P1 + c_fixed_β*P2 + c_fixed_γ*P3
-                
-                if config.mode == :uniform
-                    append!(results["IC_violating_wirings"], uniform_extremal_wiring_search(c_fixed_nl_box, config.max_wiring_order, is_NOT_in_IC))
-                elseif config.mode == :greedy_lifting
-                    push!(results["IC_violating_wirings"], greedy_lifting_extremal_wiring_search(c_fixed_nl_box, config.max_wiring_order, is_NOT_in_IC, sdp_conditions.nearest_pyNPA_point ))
-                elseif config.mode == :collect_plot_data
-                    push!(results["assessed_points"], (c_x_val, c_y_val))
+                if config.mode != :collect_plot_data
+                    append!(results["IC_violating_wirings"], search_at_fixed_point(c_x_val, c_y_val, P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, is_NOT_in_IC))
                 else
-                    error("Unknown mode")
+                    push!(results["assessed_points"], (c_x_val, c_y_val))
                 end
             end
 
             n_results_after = length(results["IC_violating_wirings"])
             if n_results_after == n_results_before_this_x
                 print2log("*No* IC-violating wirings found for x-value $(round(c_x_val, digits=3)) in the IC-Q gap.")
+            end
+        end
+    
+    elseif config.box_search_space == :below_IC_boundary
+        safety_margin = 1 #units of boundary_precision
+        search_strip_width = 2 #units of search_precision
+
+        for c_boundary_dist in 1:search_strip_width
+            
+            n_results_before_this_strip_row = length(results["IC_violating_wirings"])
+
+            for (c_x_idx, c_x_val) in enumerate(results["quantum_secondary_scores"])
+                if mod(c_x_idx, Int(floor(config.search_precision/config.boundary_precision))) != 0 || (results["unwired_IC_primary_scores"][c_x_idx] - results["quantum_primary_scores"][c_x_idx]) <= safety_margin*config.boundary_precision + c_boundary_dist*config.search_precision  #Minimal gap width of 2 x safety margin + more than one unit of search precision 
+                    continue #IC-Q gap needs to be wide enough to avoid false positives by numerical errors
+                end
+
+                c_y_val = results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.boundary_precision - c_boundary_dist*config.search_precision
+                print2log("Searching for a wiring at x=$(round(c_x_val, digits=3)) and y=$(round(c_y_val, digits=3))...")
+
+                
+                if config.mode != :collect_plot_data
+                    append!(results["IC_violating_wirings"], search_at_fixed_point(c_x_val, c_y_val, P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, is_NOT_in_IC))
+                else
+                    push!(results["assessed_points"], (c_x_val, c_y_val))
+                end
+            end
+
+            n_results_after_this_strip_row = length(results["IC_violating_wirings"])
+            if n_results_after_this_strip_row == n_results_before_this_strip_row
+                print2log("*No* IC-violating wirings found for row $(c_boundary_dist) below the IC boundary.")
             end
         end
     else

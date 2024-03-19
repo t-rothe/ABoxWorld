@@ -112,9 +112,11 @@ end
 
 function prepare_NPA_BoxDistance(initial_P::Array{Float64, 4}; membership_level::Int=3, distance_level::Int=2)
     #initial_distance = sdp_conditions.min_distance_to_pyNPA(initial_P; level=distance_level)
+    initial_distance = sdp_conditions.randomization_distance_to_NPA(initial_P; level=membership_level)
     function NPA_BoxDistance(target_P::Array{Float64, 4})
         if !sdp_conditions.is_in_NPA(target_P; level=membership_level)
-            return sdp_conditions.min_distance_to_pyNPA(target_P; level=distance_level) # - initial_distance
+            #return sdp_conditions.min_distance_to_pyNPA(target_P; level=distance_level) # - initial_distance
+            return sdp_conditions.randomization_distance_to_NPA(target_P; level=membership_level) - initial_distance
         else
             return 0.0
         end
@@ -124,7 +126,7 @@ end
 
 
 
-## Uniform version:
+## Uniform search:
 function greedy_sufficient_box_in_orbits(P::Array{Float64, 4}, W_vec::Vector{Float64}, max_wiring_order::Int, stopping_condition::Function)    
     """ If there is a notion of a "sufficiently good" box, then we can stop early; Not always neccesary to compute orbits up to max_wiring_order. """
     
@@ -180,7 +182,7 @@ end
 
 function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wiring_order::Int, IC_violation_criterion::Function)
    
-   IC_violating_wirings = []
+   IC_violating_wirings = Any[]
 
    for c_extremal_wiring_types in Iterators.product(keys(extremal_wiring_params), keys(extremal_wiring_params))
        for c_extremal_wiring_params_pair in Iterators.product(Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[1]]))...), Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[2]]))...))
@@ -248,7 +250,7 @@ function greedy_lifting_extremal_wiring_search(initial_box::Array{Float64,4}, ma
                     sufficient_box = Q_candidates[sufficient_idx]
                     print2log("Found IC-violating wired box at order $c_order")
                     found_wiring_series = [[best_wirings[i][1] for i in 1:(c_order-1)]; [(types=c_extremal_wiring_types, params=c_extremal_wiring_params_pair, associatity=associativities[sufficient_idx]), ]]
-                    return (initial_box=initial_box, wired_box=sufficient_box, wiring_series=found_wiring_series, wiring_order=c_order)
+                    return [(initial_box=initial_box, wired_box=sufficient_box, wiring_series=found_wiring_series, wiring_order=c_order), ]
                 end
 
                 # We have not found a sufficient box for this wiring and order, so update best wiring
@@ -266,7 +268,7 @@ function greedy_lifting_extremal_wiring_search(initial_box::Array{Float64,4}, ma
                     best_wirings[c_order] = select_best_wiring(best_wirings[c_order], wiring_candidate)
 
                 else #-> scoring function decides if more than one non-quantum Q candidate
-                    print2log("Since we got post-quantum CHSH values $(chsh_scores), we need to use scoring function to decide. This will take a while ...")
+                    print2log("Since we got post-quantum CHSH values $(chsh_scores), we need to use scoring function to decide. This will probably take a while ...")
                     non_quantum_Q_candidates = [Q_candidates[i] for i in non_quantum_Q_inds]
                     (max_score_val, max_score_idx) = findmax(scoring_functional, non_quantum_Q_candidates)   
                     max_score_original_idx = non_quantum_Q_inds[max_score_idx]
@@ -288,5 +290,9 @@ function greedy_lifting_extremal_wiring_search(initial_box::Array{Float64,4}, ma
     end
     
     #Found nothing, stopping after reaching max_wiring_order
-    return missing
+    return [missing, ]
  end
+
+# ----------------- #
+# ----------------- #
+ 

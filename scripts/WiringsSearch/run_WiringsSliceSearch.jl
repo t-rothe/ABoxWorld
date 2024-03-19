@@ -54,24 +54,93 @@ include(scriptsdir("WiringsSearch", "WiringsSliceSearch.jl"))
 
 #-------------------------------------------------------
 
+function main(c_config)
+    print(c_config)
 
-c_config = WiringsSliceSearchConfig(mode=:greedy_lifting, #:uniform, #
-                                box_search_space=:mid_mid_point, #:full_IC_Q_gap, #,# , #
+    #data_output = Wirings_Slice_Search(c_config; verbose=true)
+
+    data_output, data_filename = produce_or_load(Wirings_Slice_Search, 
+                                                c_config,
+                                                mkpath(datadir("WiringsSliceSearch"));
+                                                verbose=true,
+                                                )
+end
+ 
+if abspath(PROGRAM_FILE) == @__FILE__
+
+    """
+    c_config = WiringsSliceSearchConfig(mode=:uniform, 
+                            box_search_space=:full_IC_Q_gap, 
+                            Box1=("PR"=>CanonicalPR),
+                            Box2=("I"=>MaxMixedBox),
+                            Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                            primary_score=CHSH_score,
+                            secondary_score=CHSHprime_score,
+                            boundary_precision=4e-3,
+                            search_precision=8e-3,
+                            precision=1.4e-2,
+                            max_wiring_order=4,
+                            )
+
+
+    c_config = WiringsSliceSearchConfig(mode=:greedy_lifting, #:uniform, #
+                                    box_search_space=:mid_mid_point, #:full_IC_Q_gap, #,# , #
+                                    Box1=("PR"=>CanonicalPR),
+                                    Box2=("I"=>MaxMixedBox),
+                                    Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                                    primary_score=CHSH_score,
+                                    secondary_score=CHSHprime_score,
+                                    boundary_precision=4e-3,
+                                    search_precision=4e-3,
+                                    precision=1.4e-2,
+                                    max_wiring_order=8,
+                                    )
+    
+    c_config = WiringsSliceSearchConfig(mode=:uniform, #
+                                box_search_space=:below_IC_boundary ,# :full_IC_Q_gap, #,# , #
                                 Box1=("PR"=>CanonicalPR),
                                 Box2=("I"=>MaxMixedBox),
                                 Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
                                 primary_score=CHSH_score,
                                 secondary_score=CHSHprime_score,
                                 boundary_precision=4e-3,
-                                search_precision=4e-3,
+                                search_precision=1e-2,
                                 precision=1.4e-2,
                                 max_wiring_order=8,
                                 )
-    
-data_output = Wirings_Slice_Search(c_config; verbose=true)
+    """
+    # Initialize a dictionary to hold the named arguments
+    named_args = Dict{String, String}()
 
-#data_output, data_filename = produce_or_load(Wirings_Slice_Search, 
-#                                            c_config,
-#                                            mkpath(datadir("WiringsSliceSearch"));
-#                                            verbose=true,
-#                                            )
+    # Iterate through each argument passed to the script
+    for arg in ARGS
+        # Split the argument on the '=' character
+        pair = split(arg, "=", limit=2)
+        if length(pair) == 2
+            # Add the key-value pair to the dictionary
+            named_args[pair[1]] = pair[2]
+        else
+            println("Ignoring malformed argument: $arg")
+        end
+    end
+
+    c_config = WiringsSliceSearchConfig(mode=Symbol(get(named_args, "mode", missing)), 
+                                box_search_space=Symbol(get(named_args, "box_search_space", missing)),
+                                Box1=("PR"=>CanonicalPR),
+                                Box2=("I"=>MaxMixedBox),
+                                Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                                primary_score=CHSH_score,
+                                secondary_score=CHSHprime_score,
+                                boundary_precision=parse(Float64, get(named_args, "boundary_precision", missing)),
+                                search_precision=parse(Float64, get(named_args, "boundary_precision", missing)),
+                                precision=1.4e-2,
+                                max_wiring_order=parse(Int, get(named_args, "max_wiring_order", missing)),
+                                )
+
+    #Example command line call:
+    #julia run_WiringsSliceSearch.jl mode=uniform box_search_space=full_IC_Q_gap boundary_precision=4e-3 search_precision=8e-3 max_wiring_order=4
+
+    main(c_config)
+end
+                       
+

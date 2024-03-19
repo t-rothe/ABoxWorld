@@ -1,5 +1,73 @@
 !isdefined(Main, :nsboxes) ? (include("nsboxes.jl"); using .nsboxes) : nothing
-using LinearAlgebra, Symbolics
+using LinearAlgebra, Symbolics, Random
+
+
+function RandomNSBox(scenario)
+    full_joint_size = (scenario[3], scenario[4], scenario[1], scenario[2])
+    
+    #------ Marginals sampling ------#
+    rand_marginals_vec_A = rand(full_joint_size[3] * (full_joint_size[1] - 1)) 
+    rand_marginals_vec_B = rand(full_joint_size[4] * (full_joint_size[2] - 1)) 
+
+    #------ (Reduced) Joints sampling ------#
+    unfolded_rand_joints_mat = Array{Float64}(undef, full_joint_size[1]-1, full_joint_size[2]-1, full_joint_size[3], full_joint_size[4])
+    #Initialization by zeros = non-contributing to sums. We thus randomly fill in the CG representation; Each somehow such that they fit in.
+    for (a,b,x,y) in Random.shuffle(collect(Iterators.product(0:full_joint_size[1]-1-1, 0:full_joint_size[2]-1-1, 0:full_joint_size[3]-1, 0:full_joint_size[4]-1)))
+        #marginal limits are the implicit [:, end] and [end, :] components derived from the CG-representation.
+        marginal_A_limit = rand_marginals_vec_A[a+(x*(full_joint_size[1]-1))+1] - sum(unfolded_rand_joints_mat[a+1,:,x+1,y+1])
+        marginal_B_limit = rand_marginals_vec_B[b+(y*(full_joint_size[2]-1))+1] - sum(unfolded_rand_joints_mat[:,b+1,x+1,y+1])
+        
+        normalization_min = -1.0 + (sum(unfolded_rand_joints_mat[:,:,x+1,y+1]) + sum(rand_marginals_vec_A[i+(x*(full_joint_size[1]-1))+1] - sum(unfolded_rand_joints_mat[i+1,:,x+1,y+1]) for i in 0:full_joint_size[1]-1-1) + sum(rand_marginals_vec_B[j+(y*(full_joint_size[2]-1))+1] - sum(unfolded_rand_joints_mat[:,j+1,x+1,y+1]) for j in 0:full_joint_size[2]-1-1))
+        
+        normalization_max = min(1.0, normalization_min + 1.0)
+        normalization_min = max(0.0, normalization_min)
+        @show normalization_min, normalization_max, marginal_A_limit, marginal_B_limit
+        unfolded_rand_joints_mat[a+1,b+1,x+1,y+1] = (rand()*(min(marginal_A_limit, marginal_B_limit, normalization_max) - normalization_min)) + normalization_min
+    end
+
+    rand_joints_mat = reshape(permutedims(unfolded_rand_joints_mat, (1,3,2,4)), (full_joint_size[1] - 1)*full_joint_size[3], (full_joint_size[2] - 1)*full_joint_size[4])
+    
+    return nsboxes.NSBox(scenario=scenario, marginals_vec_A=rand_marginals_vec_A, marginals_vec_B=rand_marginals_vec_B, joints_mat=rand_joints_mat)
+end
+
+
+extremal_NSBox_params_CHSH = Dict(:PR => [:μ, :ν, :σ], 
+                                :LD => [:α, :γ, :β, :λ], 
+                                )
+
+function Random_NS_Mixture_CHSH(;include_local_mixtures=false, non_local_bias=false, return_decomp=false)
+    """Random Triangle mixture """
+    total_num_boxes = 3
+    num_LD_boxes = include_local_mixtures ? rand(0:total_num_boxes) : (non_local_bias ? rand(1:2) : rand(0:total_num_boxes-1))
+    rand_triangle = []
+    for _ in 1:num_LD_boxes
+        push!(rand_triangle, (:LD, rand(collect(Iterators.product((0:1 for _ in 1:length(extremal_NSBox_params_CHSH[:LD]))...)))))
+    end
+    for _ in 1:total_num_boxes - num_LD_boxes
+        push!(rand_triangle, (:PR, rand(collect(Iterators.product((0:1 for _ in 1:length(extremal_NSBox_params_CHSH[:PR]))...)))))
+    end
+    
+    box_coeffs = rand(total_num_boxes)
+    normalized_box_coeffs = box_coeffs ./ sum(box_coeffs)
+
+    box_coeff_pairs = []
+    box_label_coeff_pairs = []
+    for (p_i, (box_type, box_params)) in enumerate(rand_triangle)
+        if box_type == :LD
+            push!(box_coeff_pairs, normalized_box_coeffs[p_i]*LocalDeterministicBoxesCHSH(;α=box_params[1], γ=box_params[2], β=box_params[3], λ=box_params[4]))
+            push!(box_label_coeff_pairs, (:LD, (α=box_params[1], γ=box_params[2], β=box_params[3], λ=box_params[4]))=>normalized_box_coeffs[p_i])
+        elseif box_type == :PR
+            push!(box_coeff_pairs, normalized_box_coeffs[p_i]*PRBoxesCHSH(;μ=box_params[1], ν=box_params[2], σ=box_params[3]))
+            push!(box_label_coeff_pairs, (:PR, (μ=box_params[1], ν=box_params[2], σ=box_params[3]))=>normalized_box_coeffs[p_i])
+        end
+    end
+    if return_decomp
+        return +(box_coeff_pairs...), box_label_coeff_pairs
+    else
+        return +(box_coeff_pairs...)
+    end
+end
+
 
 function UniformRandomBox(scenario)
     """Returns a (specific!) NSBox for correlations obtainable from a Uniform Random Box / Maximally Mixed State
@@ -114,13 +182,13 @@ function LocalDeterministicBoxesCHSH(;α, γ, β, λ, unsafe=false)
                     if unsafe
                         LocalDetBox[a+1,b+1,x+1,y+1] = 1.0*(mod(1 + mod(a + (α*x + γ),2), 2) * mod(1 + mod(b + (β*y + λ), 2), 2))
                     else
-                        LocalDetBox[a+1,b+1,x+1,y+1] = 1.0*((1 ⊻ (a ⊻ (α*x + γ))) & (1 ⊻ (b ⊻ (β*y + λ))))
+                        LocalDetBox[a+1,b+1,x+1,y+1] = 1.0*((1 ⊻ (a ⊻ (α*x ⊻ γ))) & (1 ⊻ (b ⊻ (β*y ⊻ λ))))
                     end
                 end
             end
         end
     end
-    #display(LocalDetBox)
+    #println(LocalDetBox)
     return nsboxes.NSBox((2,2,2,2), LocalDetBox; unsafe=unsafe)
 end
 

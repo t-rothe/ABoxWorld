@@ -1,7 +1,7 @@
 module sdp_conditions
 
     using LinearAlgebra
-    using PythonCall
+    ###using PythonCall
     using JuMP, MosekTools
 
     !isdefined(Main, :nsboxes) ? error("First import the nsboxes module") : nothing
@@ -126,10 +126,10 @@ module sdp_conditions
 
 
     #ncpol2sdpa.py based implementations:
-    pyimport("ncpol2sdpa")
+    ###pyimport("ncpol2sdpa")
 
-    pyiter = pyimport("itertools")
-    n2s = pyimport("ncpol2sdpa")
+    ###pyiter = pyimport("itertools")
+    ###n2s = pyimport("ncpol2sdpa")
 
     function is_in_pyNPA(p_obs::Array{Float64, 4}; level::Int=2, verbose=false)
         P = n2s.Probability([2, 2], [2, 2])

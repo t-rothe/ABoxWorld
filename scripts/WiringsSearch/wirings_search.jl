@@ -105,6 +105,15 @@ function is_NOT_in_IC(secondary_score_val::Real,CHSH_score_val::Real, Box1::Arra
     #return conditions.check(Generalized_Original_IC_Bound(), MixedBox, :Q)
 end
 
+is_NOT_in_Uffink(P::Array{Float64,4}) = !(conditions.check(Uffink_Bipartite_2222_Inequality(), P, :Q))
+
+function is_NOT_in_Uffink(secondary_score_val::Real,CHSH_score_val::Real, Box1::Array{Float64,4}, Box2::Array{Float64,4}, Box3::Array{Float64,4}, secondary_score::Function)
+    α, β, γ = Compute_Coeff(Box1, Box2, Box3, secondary_score_val, CHSH_score_val, secondary_score)
+    MixedBox = α*Box1 + β*Box2 + γ*Box3
+    
+    return is_NOT_in_Uffink(MixedBox)
+    #return conditions.check(Uffink_Bipartite_2222_Inequality(), MixedBox, :Q)
+end
 
 # ----------------- #
 # ----------------- #
@@ -127,8 +136,9 @@ end
 
 
 ## Uniform search:
-function greedy_sufficient_box_in_orbits(P::Array{Float64, 4}, W_vec::Vector{Float64}, max_wiring_order::Int, stopping_condition::Function)    
-    """ If there is a notion of a "sufficiently good" box, then we can stop early; Not always neccesary to compute orbits up to max_wiring_order. """
+function find_uniformly_wired_sufficient_box_in_orbits(P::Array{Float64, 4}, W_vec::Vector{Float64}, max_wiring_order::Int, stopping_condition::Function)    
+    """ Note: Here we want to find a sufficient "box", not wiring (which is fixed in this subroutine)
+        If there is a notion of a "sufficiently good" box, then we can stop early; Not always neccesary to compute orbits up to max_wiring_order. """
     
     W = reshape(W_vec,:,1)  #Bevause of the nature of the tensorized boxproduct, W must be in batched form
     
@@ -161,46 +171,40 @@ end
 # ----------------- #
 # ----------------- #
 
-#Extremal wire types & parameters (binary):
-extremal_wiring_params = Dict(:D => [:α,], 
-:O => [:α, :β, :γ], 
-:X => [:α, :β, :γ],
-:A => [:α, :β, :γ, :δ, :ε],
-:S => [:α, :β, :γ, :δ, :ε],
-)
-
-#Precompute the extremal wirings in the Dict format of extremal_wiring_params
-extremal_wires_dict = Dict()
-for (wiretype_A, wiretype_B) in Iterators.product(keys(extremal_wiring_params), keys(extremal_wiring_params))
-   for c_wire_params_B in Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[wiretype_B]))...)
-       for c_wire_params_A in Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[wiretype_A]))...)
-           extremal_wires_dict[(wiretype_A, c_wire_params_A, wiretype_B, c_wire_params_B)] = extremal_wires(wiretype_A, Dict(zip(extremal_wiring_params[wiretype_A], c_wire_params_A)), wiretype_B, Dict(zip(extremal_wiring_params[wiretype_B], c_wire_params_B)))
-       end
-   end
-end
 
 
-function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wiring_order::Int, IC_violation_criterion::Function)
+
+function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wiring_order::Int, IC_violation_criterion::Function, wires_generator::Function=extremal_wires_generator)
    
-   IC_violating_wirings = Any[]
-
-   for c_extremal_wiring_types in Iterators.product(keys(extremal_wiring_params), keys(extremal_wiring_params))
-       for c_extremal_wiring_params_pair in Iterators.product(Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[1]]))...), Iterators.product((0:1 for _ in 1:length(extremal_wiring_params[c_extremal_wiring_types[2]]))...))
-           
-           c_extremal_wires = extremal_wires_dict[(c_extremal_wiring_types[1], c_extremal_wiring_params_pair[1], c_extremal_wiring_types[2], c_extremal_wiring_params_pair[2])]
-           
-           IC_viol_wired_box, viol_wiring_order = greedy_sufficient_box_in_orbits(initial_box, c_extremal_wires, max_wiring_order, IC_violation_criterion)
-           if !ismissing(IC_viol_wired_box)
-               print2log("Found IC-violating uniformly wired box at order $viol_wiring_order")
-               push!(IC_violating_wirings, (initial_box=initial_box, wired_box=IC_viol_wired_box, wiring_types=c_extremal_wiring_types, wiring_params=c_extremal_wiring_params_pair, wiring_order=viol_wiring_order))
-           end
-       end
-   end
+    IC_violating_wirings = Any[]
+    
+    for (w_i, (c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params)) in enumerate(wires_generator())
+        #c_extremal_wires = extremal_wires_dict[(c_extremal_wiring_types[1], c_extremal_wiring_params_pair[1], c_extremal_wiring_types[2], c_extremal_wiring_params_pair[2])]
+        println("Currently wiring, no. : $w_i")
+        IC_viol_wired_box, viol_wiring_order = find_uniformly_wired_sufficient_box_in_orbits(initial_box, c_extremal_wires, max_wiring_order, IC_violation_criterion)
+        
+        if !ismissing(IC_viol_wired_box)
+            print2log("Found IC-violating uniformly wired box at order $viol_wiring_order")
+            push!(IC_violating_wirings, (initial_box=initial_box, wired_box=IC_viol_wired_box, wiring_types=c_extremal_wiring_types, wiring_params=c_extremal_wiring_params, wiring_order=viol_wiring_order))
+        end
+    end
    return IC_violating_wirings
 end
 
 
 
+
+function max_in_CHSH_family(Q::Array{Float64,4})
+    scores_vals = []
+    for s in Iterators.product(([-1, 1] for _ in 1:4)...)
+        if prod(s) == -1 #Only allow valid CHSH functionals (= odd number of negative coefficient)
+            CHSH_functional = games.CHSH_score_generator(s...; batched=false)	
+            #println("CHSH($(s[1]), $(s[2]), $(s[3]), $(s[4])) = ", CHSH_functional(Q))
+            push!(scores_vals, CHSH_functional(Q))  
+        end
+    end
+    return maximum(scores_vals)
+end
 
 function select_best_wiring(current_best::Union{NamedTuple, Missing}, candidate::NamedTuple)
     """Accompying utility function for greedy_lifting_extremal_wiring_search
@@ -209,14 +213,22 @@ function select_best_wiring(current_best::Union{NamedTuple, Missing}, candidate:
     """
     if ismissing(current_best) #If no current best
         return candidate
-    elseif ismissing(candidate.score)
+    elseif !ismissing(candidate.score) && !ismissing(current_best.score)
+        if candidate.score > current_best.score
+            return candidate
+        else
+            return current_best
+        end
+    elseif ismissing(candidate.score) && !ismissing(current_best.score)
         return current_best
-    elseif ismissing(current_best.score)
-        return candidate
-    elseif candidate.chsh > current_best.chsh
+    elseif ismissing(current_best.score) && !ismissing(candidate.score)
         return candidate
     else
-        return current_best
+        if candidate.chsh > current_best.chsh
+            return candidate
+        else
+            return current_best
+        end
     end
 end
 
@@ -255,7 +267,16 @@ function greedy_lifting_extremal_wiring_search(initial_box::Array{Float64,4}, ma
 
                 # We have not found a sufficient box for this wiring and order, so update best wiring
                 chsh_scores = [CHSH_score(Q_candidate) for Q_candidate in Q_candidates]
+                #@show chsh_scores
+                #dist_scores = [sdp_conditions.randomization_distance_to_NPA_boundary(Q_candidate; level=3) for Q_candidate in Q_candidates]
+                #@show dist_scores
+                IC_scores = [IC_Bound_LHS(Q_candidate) for Q_candidate in Q_candidates]
+                chsh_scores = IC_scores
+                #@show IC_scores
+                #chsh_scores = [max_in_CHSH_family(Q_candidate) for Q_candidate in Q_candidates]
+                
                 non_quantum_Q_inds = findall(!sdp_conditions.is_in_NPA, Q_candidates)
+                #@show c_extremal_wiring_types,chsh_scores, non_quantum_Q_inds
                 
                 #Determine best associativity of wiring
                 if isempty(non_quantum_Q_inds) #all quantum -> CHSH determines best

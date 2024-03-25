@@ -51,7 +51,7 @@ function Wirings_Random_Search(config::WiringsRandomSearchConfig; verbose::Bool=
 
     safety_margin = 1 #units of search precision (so try to keep search_precision it small!)
 
-    max_num_trails = 4
+    max_num_trails = 10000
     box_cnt = 0
     for trail in 1:max_num_trails
         init_box_inst, init_box_decomp = Random_NS_Mixture_CHSH(;non_local_bias=true, return_decomp=true)

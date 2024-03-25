@@ -1,6 +1,6 @@
 using DrWatson
 @quickactivate "ABoxWorld"
-#using Pkg; Pkg.instantiate()
+using Pkg; Pkg.instantiate()
 
 include(srcdir("ABoxWorld.jl"));
 
@@ -79,6 +79,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                     precision=1.4e-2, 
                                     max_wiring_order=2
                                 )
+    #The equivalent command line call would be:
+    #julia run_WiringsRandSearch.jl mode=uniform approach_from=above boundary_precision=4e-3 max_wiring_order=2
 
     """
     # Initialize a dictionary to hold the named arguments

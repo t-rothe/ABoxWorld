@@ -95,6 +95,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                     precision=1.4e-2,
                                     max_wiring_order=8,
                                     )
+
+    #Command-line equivalent to the above config:
+    julia run_WiringsSliceSearch.jl mode=greedy_lifting box_search_space=mid_mid_point boundary_precision=4e-3 search_precision=4e-3 max_wiring_order=10
+    and the other fixed point:
+    julia run_WiringsSliceSearch.jl mode=greedy_lifting box_search_space=point_near_IC_boundary boundary_precision=4e-3 search_precision=4e-3 max_wiring_order=8
     
     c_config = WiringsSliceSearchConfig(mode=:uniform, #
                                 box_search_space=:below_IC_boundary ,# :full_IC_Q_gap, #,# , #

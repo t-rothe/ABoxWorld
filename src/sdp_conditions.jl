@@ -124,6 +124,69 @@ module sdp_conditions
     end
 
 
+    function randomization_distance_to_NPA_boundary(FullNSJoint::Array{Float64,4}; level::Int, ϵ::AbstractFloat=eps(Float32), verbose=false)
+        function npa_test(λ, η)
+            PA = QuantumNPA.projector(1, 1:2, 1:2, full=true)
+            PB = QuantumNPA.projector(2, 1:2, 1:2, full=true)
+    
+            Box = nsboxes.NSBox((2,2,2,2), FullNSJoint)
+            
+            eq_constraints =  [(η*PA[1,1] + ((1-η)*0.5*QuantumNPA.Id)) - (λ*Box.marginals_vec_A[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                            (η*PA[1,2] + ((1-η)*0.5*QuantumNPA.Id)) - (λ*Box.marginals_vec_A[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                            (η*PB[1,1] + ((1-η)*0.5*QuantumNPA.Id)) - (λ*Box.marginals_vec_B[1] + (1-λ)*0.5)*QuantumNPA.Id,
+                            (η*PB[1,2] + ((1-η)*0.5*QuantumNPA.Id)) - (λ*Box.marginals_vec_B[2] + (1-λ)*0.5)*QuantumNPA.Id,
+                            (η*PA[1,i]*PB[1,j] + ((1-η)*0.25*QuantumNPA.Id) - (λ*Box.joints_mat[i,j] + (1-λ)*0.25)*QuantumNPA.Id for (i,j) in Iterators.product(1:2, 1:2))...,
+                            ]
+           
+            return QuantumNPA.npa_max(λ*QuantumNPA.Id, level; eq=eq_constraints, solver=Mosek.Optimizer) >= λ - ϵ #>= 0.0
+        end
+    
+        if is_in_NPA(FullNSJoint; level=level, verbose=verbose)
+        
+            # Binary search on continuous variable λ
+            λ_interval = (0.0, 1.0)
+            η_interval = (0.0, 1.0)
+            
+            c_λ_window = (λ_interval[1], λ_interval[end])
+            c_η_window = (η_interval[1], η_interval[end])
+            prev_λ, prev_η = missing, missing
+    
+            while c_λ_window[2] - c_λ_window[1] > ϵ && c_η_window[2] - c_η_window[1] > ϵ
+                c_λ = (c_λ_window[1] + c_λ_window[2])/2
+                c_η = (c_η_window[1] + c_η_window[2])/2
+                
+                if ismissing(prev_λ) || ismissing(prev_η)
+                    c_inward_output, c_outward_output = npa_test(c_λ, c_η), npa_test(c_λ, c_η)
+                else
+                    c_inward_output, c_outward_output = npa_test(c_λ, prev_η), npa_test(prev_λ, c_η)
+                end
+                
+                if c_outward_output && c_inward_output
+                    c_λ_window = (c_λ, c_λ_window[2])
+                    c_η_window = (c_η_window[1], c_η)
+                elseif !c_outward_output && c_inward_output
+                    c_λ_window = (c_λ_window[1], c_λ)
+                    c_η_window = (c_η, c_η_window[2])
+                elseif c_outward_output && !c_inward_output
+                    c_λ_window = (c_λ, c_λ_window[2])
+                    c_η_window = (c_η_window[1], c_η)
+                elseif !c_outward_output && !c_inward_output
+                    c_λ_window = (c_λ_window[1], c_λ)
+                    c_η_window = (c_η, c_η_window[2]) 
+                end
+            end
+            
+            outer_dist = (λ_interval[2] - (c_λ_window[1] + c_λ_window[2])/2)
+            inner_dist = (η_interval[2] - (c_η_window[1] + c_η_window[2])/2)
+            
+            #@show outer_dist, inner_dist
+            return -(inner_dist - outer_dist)
+    
+        else
+            return randomization_distance_to_NPA(FullNSJoint; level=level, ϵ=ϵ, verbose=verbose)
+        end
+    end
+
 
     #ncpol2sdpa.py based implementations:
     ###pyimport("ncpol2sdpa")

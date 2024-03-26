@@ -14,7 +14,7 @@ include(scriptsdir("WiringsSearch", "wirings_search.jl"))
     boundary_precision::Float64
     search_precision::Float64; @assert search_precision >= boundary_precision #Search can't be more precise than the computed boundaries
     precision::Float64
-    wires_generator::Function = extremal_wires_generator
+    wires_generator::Union{Function, Channel} = extremal_wires_generator
     max_wiring_order::Int
 end
 
@@ -32,7 +32,7 @@ end
 
 
 
-function search_at_fixed_point(fixed_primary_score_val::Float64, fixed_secondary_score_val::Float64, Box1::Array{Float64, 4}, Box2::Array{Float64, 4}, Box3::Array{Float64, 4}, secondary_score::Function, wiring_search_mode::Symbol, max_wiring_order::Int, wires_generator::Function, IC_violation_criterion::Function)
+function search_at_fixed_point(fixed_primary_score_val::Float64, fixed_secondary_score_val::Float64, Box1::Array{Float64, 4}, Box2::Array{Float64, 4}, Box3::Array{Float64, 4}, secondary_score::Function, wiring_search_mode::Symbol, max_wiring_order::Int, wires_generator::Union{Function, Channel}, IC_violation_criterion::Function)
     fixed_α, fixed_β, fixed_γ = Compute_Coeff(Box1, Box2, Box3, fixed_primary_score_val, fixed_secondary_score_val, secondary_score)
     fixed_nl_box = fixed_α*Box1 + fixed_β*Box2 + fixed_γ*Box3
 
@@ -162,6 +162,7 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
         secondary_axis_idx = Int(ceil(3/4*length(results["unwired_IC_secondary_scores"])))
         fixed_nl_point = (results["unwired_IC_secondary_scores"][secondary_axis_idx], results["unwired_IC_primary_scores"][secondary_axis_idx] - 2*config.boundary_precision) 
 
+        
         if config.mode != :collect_plot_data
             append!(results["IC_violating_wirings"], search_at_fixed_point(fixed_nl_point[1], fixed_nl_point[2], P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, config.wires_generator, is_NOT_in_IC))
         else

@@ -64,6 +64,8 @@ function main(c_config)
                                                 mkpath(datadir("WiringsSliceSearch"));
                                                 verbose=true,
                                                 )
+
+    print(data_output)
 end
  
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -113,6 +115,31 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 precision=1.4e-2,
                                 max_wiring_order=8,
                                 )
+
+
+
+                                c_config = WiringsSliceSearchConfig(mode=:single, #:uniform,
+                                box_search_space=:point_near_IC_boundary, #:point_near_IC_boundary,
+                                Box1=("PR"=>CanonicalPR),
+                                Box2=("I"=>MaxMixedBox),
+                                #Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                                Box3=("PL(0,1,0,1)"=>PL(0,1,0,1)),
+                                primary_score=CHSH_score,
+                                secondary_score=CHSHprime_score,
+                                IC_violation_criterion = is_NOT_in_Uffink, 
+                                boundary_precision=4e-3,
+                                search_precision=4e-3,
+                                precision=1.4e-2,
+                                wires_generator=Allcock2009_wires,
+                                #wires_generator=canonical_extremal_wires_generator,
+                                max_wiring_order=12,
+                                )
+    Command-line equivalent:
+    julia run_WiringsSliceSearch.jl mode=single box_search_space=point_near_IC_boundary boundary_precision=4e-3 search_precision=4e-3 max_wiring_order=10
+    
+    
+
+
     """
     # Initialize a dictionary to hold the named arguments
     named_args = Dict{String, String}()
@@ -133,12 +160,18 @@ if abspath(PROGRAM_FILE) == @__FILE__
                                 box_search_space=Symbol(get(named_args, "box_search_space", missing)),
                                 Box1=("PR"=>CanonicalPR),
                                 Box2=("I"=>MaxMixedBox),
-                                Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                                #Box3=("PL(0,0,0,0)"=>PL(0,0,0,0)),
+                                Box3=("PL(0,1,0,1)"=>PL(0,1,0,1)),
+                                IC_violation_criterion = is_NOT_in_Uffink, 
                                 primary_score=CHSH_score,
                                 secondary_score=CHSHprime_score,
                                 boundary_precision=parse(Float64, get(named_args, "boundary_precision", missing)),
                                 search_precision=parse(Float64, get(named_args, "boundary_precision", missing)),
                                 precision=1.4e-2,
+                                wires_generator=extremal_wires_generator,
+                                #wires_generator=distributed_extremal_wires_generator,
+                                #wires_generator=canonical_extremal_wires_generator,
+                                #wires_generator=Allcock2009_wires,
                                 max_wiring_order=parse(Int, get(named_args, "max_wiring_order", missing)),
                                 )
 

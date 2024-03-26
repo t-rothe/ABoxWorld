@@ -5,6 +5,8 @@ module conditions
 
     #using Symbolics
     using LinearAlgebra
+    using Distances
+
     !isdefined(Main, :nsboxes) ? error("First import the nsboxes module") : nothing
     using ..nsboxes
 

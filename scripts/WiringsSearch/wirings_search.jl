@@ -180,7 +180,6 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
     
     for (w_i, (c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params)) in enumerate(wires_generator())
         #c_extremal_wires = extremal_wires_dict[(c_extremal_wiring_types[1], c_extremal_wiring_params_pair[1], c_extremal_wiring_types[2], c_extremal_wiring_params_pair[2])]
-        println("Currently wiring, no. : $w_i")
         IC_viol_wired_box, viol_wiring_order = find_uniformly_wired_sufficient_box_in_orbits(initial_box, c_extremal_wires, max_wiring_order, IC_violation_criterion)
         
         if !ismissing(IC_viol_wired_box)
@@ -192,6 +191,9 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
 end
 
 
+# ----------------- #
+# Greedy Lifting Search
+# ----------------- #
 
 
 function max_in_CHSH_family(Q::Array{Float64,4})

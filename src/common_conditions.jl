@@ -1,6 +1,8 @@
 !isdefined(Main, :nsboxes) ? (include("nsboxes.jl"); using .nsboxes) : nothing
 !isdefined(Main, :conditions) ? (include("conditions.jl"); using .conditions) : nothing
 
+using Distances
+
 global_eps_tol = 1e-10 #Global tolerance for approximate comparisons
 
 function NS_Conditions(;scenario=(2,2,2,2))
@@ -70,6 +72,7 @@ function NPA_TLM_Criterion()
     end
     return conditions.GeneralizedCorrelationCondition(;scenario=(2,2,2,2), functional=npa_tlm_functional, compare_operator=(<=), bound=pi, setBounds=Dict(:Q => pi))
 end
+
 
 
 function I3322_Inequality()
@@ -146,7 +149,150 @@ function Generalized_Original_IC_Bound(;n=2)
 end
 
 
+# ------------------------------------ #
+# Numerical, Redundant Information bound (see Yu_Scarani_2022)
+# ------------------------------------ #
+
+
+function condit_and_B_marginal_RAC_guess_probabilities(E_xy::Array{Float64, 2}; n, e_c)
+    @assert n == 2
+
+    f(in_vec) = in_vec[0+1] ⊻ in_vec[1+1] # mod(n - 1 - sum(prod( (α_vec[0+1] + α_vec[l+1] for l in 1:i )  ) for i in 1:n-1) ,2)
+    h(in_vec) = in_vec[0+1]
+
+    condit_probabs = Array{Float64}(undef, 2^n, 2, n) #P(α_vec | B_i, i = β)
+    B_marginal_probabs = zeros(2, n) #P(B_i, i = β)
+    for β in 0:n-1
+        for B_i_val in 0:1
+            for (α_idx, α_vec) in enumerate(Iterators.product(fill(0:1, n)...))
+                nominator = 1/2 + ((e_c/2)*sum( (f(α_vec) == j) * (-1)^(h(α_vec) == B_i_val) * E_xy[j+1,β+1] for j in 0:n-1))
+                denominator = 1/2 + ((e_c/2) * (1/(2^n)) * sum( sum( (f(k_vec) == j) * (-1)^(h(k_vec) == B_i_val) * E_xy[j+1,β+1] for j in 0:n-1) for k_vec in Iterators.product(fill(0:1, n)...)))
+                condit_probabs[α_idx, B_i_val+1, β+1] = (1/(2^n)) * nominator/denominator
+                B_marginal_probabs[B_i_val+1, β+1] += (1/(2^n))*nominator
+            end
+        end
+    end
+
+    return condit_probabs, B_marginal_probabs #2^n x 2 x n array and 2 x n matrix, representing P(α_vec | B_i = b_i, i = β) (with different β in 2nd dimension) and P(B_i | i = β)
+end
+
+H_Shannon(p_vec::Vector{Float64}) = -sum(p*log2(p) for p in p_vec)
+
+function total_mutual_info(condit_probabs::Array{Float64, 3}, B_marginal_probabs::Matrix{Float64}; n)    
+    # I(α_vec : B_i | i = β) = 1 - sum_{b_i} P(B_i = b_i | i = β)*H(α_vec | B_i = b_i, i = β)
+    return sum(n - sum(B_marginal_probabs[B_i_val+1, β+1] * H_Shannon(condit_probabs[:, B_i_val+1, β+1]) for B_i_val in 0:1) for β in 0:n-1)
+end
+
+
+binary_convex_mixture(p::Vector{Float64}, q::Vector{Float64}; λ::Float64) = λ*p + (1-λ)*q
+
+function total_redundant_info(condit_probabs::Array{Float64, 3}; n)
+    #Starting point = condit probabs P(α_vec | B_i, i=β)
+
+    optim_sample_resolution = 1e3 #or 20000
+
+    mixtures_B_2 = [binary_convex_mixture(condit_probabs[:, 0+1, 2], condit_probabs[:, 1+1, 2]; λ) for λ in range(0.0, 1.0, step=1/optim_sample_resolution)]
+    closest_condit_probabs_1_to_2 = [argmin(mixture -> kl_divergence(condit_probabs[:, B_1_val+1, 1], mixture), mixtures_B_2) for B_1_val in 0:1]
+    projected_info_12 = sum(condit_probabs[α_idx, B_1_val+1, 1] * log(closest_condit_probabs_1_to_2[B_1_val+1][α_idx] / (1/2^n) ) for B_1_val in 0:1, α_idx in 1:2^n)
+
+    mixtures_B_1 = [binary_convex_mixture(condit_probabs[:, 0+1, 1], condit_probabs[:, 1+1, 1]; λ) for λ in range(0.0, 1.0, step=1/optim_sample_resolution)]
+    closest_condit_probabs_2_to_1 = [argmin(mixture -> kl_divergence(condit_probabs[:, B_2_val+1, 2], mixture), mixtures_B_1) for B_2_val in 0:1]
+    projected_info_21 = sum(condit_probabs[α_idx, B_2_val+1, 2] * log(closest_condit_probabs_2_to_1[B_2_val+1][α_idx] / (1/2^n) ) for B_2_val in 0:1, α_idx in 1:2^n)
+
+    return min(projected_info_12, projected_info_21)
+end
+
+function RedundantInfo_IC_Bound(;n=2, e_c=0.001)
+    """ Assume (n,n,2,2) scenario and uniform distributed input data α_vec at A. 
+    """
+
+    function S_IC(nsjoint::Array{Float64, 4})
+        @assert (size(nsjoint,1),size(nsjoint,2)) == (n, n)
+        @assert (size(nsjoint,3),size(nsjoint,4)) == (2, 2)
+
+        E_xy = ProbBellCorrelator(nsjoint) #  ProbBellCorrelator
+
+        condit_probabs, B_marginals_probabs = condit_and_B_marginal_RAC_guess_probabilities(E_xy; n=n, e_c=e_c) #2^n x 2 x n array
+        total_mut_info = total_mutual_info(condit_probabs, B_marginals_probabs; n=n)
+        total_red_info = total_redundant_info(condit_probabs; n=n)
+        println("Total mutual info: ", total_mut_info)
+        println("Total redundant info: ", total_red_info)
+        println("Total info: ", total_mut_info - total_red_info)
+        return total_mut_info - (total_red_info * (1/log(4)))
+    end
+
+    channel_capacity = 1 - H_bin((1+e_c)/2)
+    return conditions.GeneralizedCorrelationCondition(;scenario=(n,n,2,2), functional=S_IC, compare_operator=(<=), bound=missing, setBounds=Dict(:Q => channel_capacity))
+end
+
+
+"""
+function limited_condit_probabs_PL0000(α, β; e_c)
+    k_plus, k_minus = 1/2 + ((e_c/2) * (α + β)), 1/2 + ((e_c/2) * (α - β))
+    limited_conditionals = Array{Float64}(undef, 2^2, 2, 2) #P(α_vec | B_i, i=β)
+    limited_conditionals[1, 0+1, 1], limited_conditionals[1, 0+1, 2] = k_plus, k_plus
+    limited_conditionals[2, 0+1, 1], limited_conditionals[2, 0+1, 2] = k_plus, 1-k_minus
+    limited_conditionals[3, 0+1, 1], limited_conditionals[3, 0+1, 2] = 1-k_plus, k_minus
+    limited_conditionals[4, 0+1, 1], limited_conditionals[4, 0+1, 2] = 1-k_plus, 1-k_plus
+    
+    limited_conditionals[1, 1+1, 1], limited_conditionals[1, 1+1, 2] = 1-limited_conditionals[1, 0+1, 1], 1-limited_conditionals[1, 0+1, 2]
+    limited_conditionals[2, 1+1, 1], limited_conditionals[2, 1+1, 2] = 1-limited_conditionals[2, 0+1, 1], 1-limited_conditionals[2, 0+1, 2]
+    limited_conditionals[3, 1+1, 1], limited_conditionals[3, 1+1, 2] = 1-limited_conditionals[3, 0+1, 1], 1-limited_conditionals[3, 0+1, 2]
+    limited_conditionals[4, 1+1, 1], limited_conditionals[4, 1+1, 2] = 1-limited_conditionals[4, 0+1, 1], 1-limited_conditionals[4, 0+1, 2]
+    
+    B_marginals = fill(1/2, 2, 2)
+    A_marginals = fill(1/(2^2), 2, 2)
+
+    return limited_conditionals ./ 2, B_marginals
+end
+
+MaxMixedBox = nsboxes.reconstructFullJoint(UniformRandomBox((2, 2, 2, 2)))
+PR(μ, ν, σ) = nsboxes.reconstructFullJoint(PRBoxesCHSH(;μ=μ, ν=ν, σ=σ))
+CanonicalPR = PR(0, 0, 0)
+PL(α, γ, β, λ) = nsboxes.reconstructFullJoint(LocalDeterministicBoxesCHSH(;α=α, γ=γ, β=β, λ=λ))
+
+CHSH_score = games.canonical_CHSH_score
+CHSHprime_score = games.CHSH_score_generator(1,-1,1,1; batched=false)
+
+
+function Compute_Slice_Coeff(P1::Array{Float64,4}, P2::Array{Float64,4}, P3::Array{Float64,4}, CHSHprime_score_val::Real, CHSH_score_val::Real) # P1, P2, P3 are 2x2x2x2 tensors
+    A = [CHSHprime_score(P1) CHSHprime_score(P2) CHSHprime_score(P3);
+           CHSH_score(P1)     CHSH_score(P2)     CHSH_score(P3);
+                1                    1                1           ]
+    b = [CHSHprime_score_val, CHSH_score_val, 1]
+    return A INSERT_BACKSLASH b # Equiv. to np.linalg.solve(A, b)
+end
+
+function Limited_RedundantInfo_IC_Bound(;e_c=0.001)
+
+    n=2
+    function S_IC(nsjoint::Array{Float64, 4})
+        @assert (size(nsjoint,1),size(nsjoint,2)) == (n, n)
+        @assert (size(nsjoint,3),size(nsjoint,4)) == (2, 2)
+
+        E_xy = ProbBellCorrelator(nsjoint) #  ProbBellCorrelator
+
+        #condit_probabs, B_marginals_probabs = condit_and_B_marginal_RAC_guess_probabilities(E_xy; n=n, e_c=e_c) #2^n x 2 x n array
+        alpha_val, _, beta_val = Compute_Slice_Coeff(CanonicalPR, MaxMixedBox, PL(0,0,0,0),CHSHprime_score(nsjoint), CHSH_score(nsjoint))
+        condit_probabs, B_marginals_probabs = limited_condit_probabs_PL0000(alpha_val, beta_val; e_c=e_c)
+         
+
+        total_mut_info = total_mutual_info(condit_probabs, B_marginals_probabs; n=n)
+        total_red_info = total_redundant_info(condit_probabs; n=n)
+        println("Total mutual info: ", total_mut_info)
+        println("Total redundant info: ", total_red_info)
+        println("Total info: ", total_mut_info - total_red_info)
+        return total_mut_info - (total_red_info * (1/log(4)))
+    end
+
+    channel_capacity = 1 - H_bin((1+e_c)/2)
+    return conditions.GeneralizedCorrelationCondition(;scenario=(n,n,2,2), functional=S_IC, compare_operator=(<=), bound=missing, setBounds=Dict(:Q => channel_capacity))
+end
+
+
+# ------------------------------------ #
 # The following are pseudo-bounds in the sense that they are not worked out and very inefficient
+# ------------------------------------ #
 
 function Jain_Raw_IC_Bound(;n=2, e_c=0.01)
     
@@ -238,3 +384,4 @@ function ZChannel_Raw_IC_Bound(;n=2, e_c=0.01)
     return conditions.GeneralizedCorrelationCondition(;scenario=(n,n,2,2), functional=IC_ineq_statement, compare_operator=(<=), bound=missing, setBounds=Dict(:Q => 0))
 end
 
+"""

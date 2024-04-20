@@ -19,7 +19,7 @@ include(scriptsdir("WiringsSearch", "wirings_search.jl"))
 end
 
 #Adapt savename() for WiringsSliceSearchConfig:
-DrWatson.default_prefix(c::WiringsSliceSearchConfig) = string(c.mode)*"_WiringsSliceSearch_"*string(c.box_search_space)*"_"*c.Box1.first*"_"*c.Box2.first*"_"*c.Box3.first*"_MaxOrder_"*string(c.max_wiring_order)
+DrWatson.default_prefix(c::WiringsSliceSearchConfig) = string(c.mode)*"_WiringsSliceSearch_"*string(c.mode)*"_"*string(c.box_search_space)*"_"*c.Box1.first*"_"*c.Box2.first*"_"*c.Box3.first*"_"*string(c.primary_score)*"_"*string(c.secondary_score)*"_boundary_precision_"*string(c.boundary_precision)*"_search_precision_"*string(c.search_precision)*"_"*string(c.wires_generator)*"_MaxOrder_"*string(c.max_wiring_order)
 DrWatson.allaccess(::WiringsSliceSearchConfig) = tuple()
 
 
@@ -139,42 +139,82 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
     end
 
 
+     # Compute the Redundant-IC Boundary
+     println("Computing Redundant_IC boundary...")
+     algebraic_max_CHSH_score = 4.0
+     min_secondary_score = 0.0
+     c_secondary_score_val = min(x2,x3) #Reset x-axis pointer to smallest value on the x-axis
+     init_CHSH_guess = 2.0
+     c_CHSH_score_val = init_CHSH_guess
+     #In this scenario, need to ensure that Quantum and IC boundaries are aligned
+     results["unwired_Redundant_IC_secondary_scores"] = copy(results["quantum_secondary_scores"]) #Float64[]
+     results["unwired_Redundant_IC_primary_scores"] = Union{Float64, Missing}[]
+     #
+     for c_secondary_score_val in results["unwired_Redundant_IC_secondary_scores"] 
+         while c_CHSH_score_val <= algebraic_max_CHSH_score - c_secondary_score_val + min_secondary_score #Check whether still within NS region; equiv. to whether there still is a pair of (G, CHSH) that can be in the NS region
+ 
+             if is_NOT_in_RedundantIC(c_secondary_score_val, c_CHSH_score_val, P1, P2, P3, secondary_score)
+                 push!(results["unwired_Redundant_IC_primary_scores"], c_CHSH_score_val)
+                 c_CHSH_score_val = (algebraic_max_CHSH_score - max(x2, x3))*(c_secondary_score_val-min(x2, x3))/(max(x2, x3)-min(x2, x3)) + init_CHSH_guess*(c_secondary_score_val-max(x2, x3))/(min(x2,x3)-max(x2, x3)) # Lagrange (linear?) interpolation on plot origin (0.75, 0.75) and (0.5, init_CHSH_guess) for x-point of next iteration; Set new initial y-value to 
+                 break # Success, so move on to next point along x-axis
+                 #That's because, Above CHSH guess does not work if boundary happens to be concave! (might guess to high -> too loose boundary)
+             else
+                 if c_CHSH_score_val + config.boundary_precision < (algebraic_max_CHSH_score-c_secondary_score_val)
+                     if c_secondary_score_val > 0.12 && c_CHSH_score_val > 3.5
+                         @show c_CHSH_score_val
+                     end
+                     c_CHSH_score_val += config.boundary_precision #Stay at same x-point, but go up along y-axis
+                 else 
+                     #Accept that we're at the boundary of the NS region and move on to the next x-point
+                     push!(results["unwired_Redundant_IC_primary_scores"], algebraic_max_CHSH_score - c_secondary_score_val + min_secondary_score) #Add the NS boundary point to the list
+                     c_CHSH_score_val = (algebraic_max_CHSH_score - max(x2, x3))*(c_secondary_score_val-min(x2, x3))/(max(x2, x3)-min(x2, x3)) + init_CHSH_guess*(c_secondary_score_val-max(x2, x3))/(min(x2,x3)-max(x2, x3)) # Lagrange interpolation; Same as in comment above
+                     break
+                 end
+             end
+         end
+     end
+     
+     # -------------------------------------------------------
+     # THE ABOVE WAS THE STANDARD STUFF; NOW WE DO THE INTERESTING STUFF
+     # ------ Wiring Search -----------------------------------
+     # -------------------------------------------------------
+
     # Search for IC-violating Uniformly wired boxes:
     print2log("Searching for IC-violating wirings...")
     
     results["IC_violating_wirings"] = Any[]
-    if config.mode == :collect_plot_data
-        results["assessed_points"] = Any[]
-    end
+    results["assessed_points"] = Any[]
+    
 
     if config.box_search_space == :mid_mid_point
-
         middle_points_IC_Q = results["quantum_primary_scores"] + (results["unwired_IC_primary_scores"] - results["quantum_primary_scores"]) ./ 2 
 
         fixed_nl_point = (results["unwired_IC_secondary_scores"][div(end,2)], middle_points_IC_Q[div(end,2)])
         
+        print2log("Searching at fixed point $(fixed_nl_point)...")
+        
         if config.mode != :collect_plot_data
             append!(results["IC_violating_wirings"], search_at_fixed_point(fixed_nl_point[1], fixed_nl_point[2], P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, config.wires_generator, is_NOT_in_IC))
-        else
-            push!(results["assessed_points"], fixed_nl_point)
         end
+        push!(results["assessed_points"], fixed_nl_point)
+        
     elseif config.box_search_space == :point_near_IC_boundary
         secondary_axis_idx = Int(ceil(3/4*length(results["unwired_IC_secondary_scores"])))
         fixed_nl_point = (results["unwired_IC_secondary_scores"][secondary_axis_idx], results["unwired_IC_primary_scores"][secondary_axis_idx] - 2*config.boundary_precision) 
 
+        print2log("Searching at fixed point $(fixed_nl_point)...")
         
         if config.mode != :collect_plot_data
             append!(results["IC_violating_wirings"], search_at_fixed_point(fixed_nl_point[1], fixed_nl_point[2], P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, config.wires_generator, is_NOT_in_IC))
-        else
-            push!(results["assessed_points"], fixed_nl_point)
         end
+        push!(results["assessed_points"], fixed_nl_point)
 
     elseif config.box_search_space == :full_IC_Q_gap
-        safety_margin = 2 #units of boundary_precision
+        safety_margin = 1 #units of boundary_precision
 
-        config.mode == :collect_plot_data && (results["assessed_points"] = [])
+        results["assessed_points"] = []
         #Iterate over all points in the IC-Q gap with a certain resolution
-        for (c_x_idx, c_x_val) in enumerate(results["quantum_secondary_scores"])
+        @showprogress "Iterating x..." for (c_x_idx, c_x_val) in enumerate(results["quantum_secondary_scores"])
             
             if mod(c_x_idx, Int(floor(config.search_precision/config.boundary_precision))) != 0 || (results["unwired_IC_primary_scores"][c_x_idx] - results["quantum_primary_scores"][c_x_idx]) <= (2*safety_margin+1)*config.boundary_precision #Minimal gap width of 2 x safety margin + more than one unit of search precision 
                 continue #IC-Q gap needs to be wide enough to avoid false positives by numerical errors
@@ -182,14 +222,12 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
 
             n_results_before_this_x = length(results["IC_violating_wirings"])
                     
-            for c_y_val in range(start=(results["quantum_primary_scores"][c_x_idx] + safety_margin*config.boundary_precision), step=config.search_precision, stop=(results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.boundary_precision))
-                print2log("Searching for a wiring at x=$(round(c_x_val, digits=3)) and y=$(round(c_y_val, digits=3))...")
-
+            @showprogress "Iterating y at x=$(round(c_x_val, digits=3))..." for c_y_val in range(start=(results["quantum_primary_scores"][c_x_idx] + safety_margin*config.boundary_precision), step=config.search_precision, stop=(results["unwired_IC_primary_scores"][c_x_idx] - safety_margin*config.boundary_precision))
+                
                 if config.mode != :collect_plot_data
                     append!(results["IC_violating_wirings"], search_at_fixed_point(c_x_val, c_y_val, P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, config.wires_generator, is_NOT_in_IC))
-                else
-                    push!(results["assessed_points"], (c_x_val, c_y_val))
                 end
+                push!(results["assessed_points"], (c_x_val, c_y_val))
             end
 
             n_results_after = length(results["IC_violating_wirings"])
@@ -200,13 +238,13 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
     
     elseif config.box_search_space == :below_IC_boundary
         safety_margin = 1 #units of boundary_precision
-        search_strip_width = 1 #units of search_precision
+        search_strip_width = 5 #units of search_precision
 
-        for c_boundary_dist in 1:search_strip_width
+        @showprogress "Iterating rows below IC boundary..." for c_boundary_dist in 1:search_strip_width
             
             n_results_before_this_strip_row = length(results["IC_violating_wirings"])
 
-            for (c_x_idx, c_x_val) in Iterators.reverse(enumerate(results["quantum_secondary_scores"]))
+            @showprogress "Iterating x-values in row $c_boundary_dist..." for (c_x_idx, c_x_val) in Iterators.reverse(enumerate(results["quantum_secondary_scores"]))
                 if mod(c_x_idx, Int(floor(config.search_precision/config.boundary_precision))) != 0 || (results["unwired_IC_primary_scores"][c_x_idx] - results["quantum_primary_scores"][c_x_idx]) <= safety_margin*config.boundary_precision + c_boundary_dist*config.search_precision  #Minimal gap width of 2 x safety margin + more than one unit of search precision 
                     continue #IC-Q gap needs to be wide enough to avoid false positives by numerical errors
                 end
@@ -217,9 +255,8 @@ function Wirings_Slice_Search(config::WiringsSliceSearchConfig; verbose::Bool=fa
                 
                 if config.mode != :collect_plot_data
                     append!(results["IC_violating_wirings"], search_at_fixed_point(c_x_val, c_y_val, P1, P2, P3, secondary_score, config.mode, config.max_wiring_order, config.wires_generator, is_NOT_in_IC))
-                else
-                    push!(results["assessed_points"], (c_x_val, c_y_val))
                 end
+                push!(results["assessed_points"], (c_x_val, c_y_val))
             end
 
             n_results_after_this_strip_row = length(results["IC_violating_wirings"])

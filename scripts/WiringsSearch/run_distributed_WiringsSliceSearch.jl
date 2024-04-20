@@ -1,6 +1,6 @@
 
 using Distributed
-addprocs(12)
+addprocs(4)
 @everywhere using SharedArrays
 
 using ProgressMeter
@@ -77,17 +77,17 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
     IC_violating_wirings = SharedArray{Any}[] #Any[]
     
     #pmap(enumerate(wires_generator())) do (w_i, (c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params))
-    @showprogress "Iterating type combinations of B..." for c_wiretype_paramnames_pairs_B in Iterators.product((zip(keys(wire_types_and_params), values(wire_types_and_params)) for _ in 1:2)...)
+    for c_wiretype_paramnames_pairs_B in Iterators.product((zip(keys(wire_types_and_params), values(wire_types_and_params)) for _ in 1:2)...)
         c_wire_types_B, c_wire_param_names_B = Tuple(t[1] for t in c_wiretype_paramnames_pairs_B), Tuple(t[2] for t in c_wiretype_paramnames_pairs_B)
         @everywhere c_wire_types_B, c_wire_param_names_B = $c_wire_types_B, $c_wire_param_names_B
-        @showprogress "Iterating type combinations of A..." for c_wiretype_paramnames_pairs_A in Iterators.product((zip(keys(wire_types_and_params), values(wire_types_and_params)) for _ in 1:2)...)
+        for c_wiretype_paramnames_pairs_A in Iterators.product((zip(keys(wire_types_and_params), values(wire_types_and_params)) for _ in 1:2)...)
             c_wire_types_A, c_wire_param_names_A = Tuple(t[1] for t in c_wiretype_paramnames_pairs_A), Tuple(t[2] for t in c_wiretype_paramnames_pairs_A)
             @everywhere c_wire_types_A, c_wire_param_names_A = $c_wire_types_A, $c_wire_param_names_A
 
-            pmap(Iterators.product((Iterators.product((0:1 for _ in c_wire_param_names_B[i])...) for i in eachindex(c_wire_types_B))...)) do c_wire_param_vals_B
+            @showprogress "Iterating parameter values of B..." pmap(Iterators.product((Iterators.product((0:1 for _ in c_wire_param_names_B[i])...) for i in eachindex(c_wire_types_B))...)) do c_wire_param_vals_B
                 #@show c_wire_param_vals_B, c_wire_types_B, c_wire_param_names_B
                 c_wire_params_B = Tuple(NamedTuple(zip(c_wire_param_names_B[i], c_wire_param_vals_B[i])) for i in eachindex(c_wire_types_B))
-                for c_wire_param_vals_A in Iterators.product((Iterators.product((0:1 for _ in c_wire_param_names_A[i])...) for i in eachindex(c_wire_types_A))...)
+                @showprogress "Iterating parameter values of A..." for c_wire_param_vals_A in Iterators.product((Iterators.product((0:1 for _ in c_wire_param_names_A[i])...) for i in eachindex(c_wire_types_A))...)
                     c_wire_params_A = Tuple(NamedTuple(zip(c_wire_param_names_A[i], c_wire_param_vals_A[i])) for i in eachindex(c_wire_types_A))
                     
                     c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params = extremal_wires(c_wire_types_A, c_wire_params_A, c_wire_types_B, c_wire_params_B), (c_wire_types_A, c_wire_types_B), (c_wire_params_A, c_wire_params_B)

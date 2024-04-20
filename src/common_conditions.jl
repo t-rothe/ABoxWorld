@@ -215,9 +215,9 @@ function RedundantInfo_IC_Bound(;n=2, e_c=0.001)
         condit_probabs, B_marginals_probabs = condit_and_B_marginal_RAC_guess_probabilities(E_xy; n=n, e_c=e_c) #2^n x 2 x n array
         total_mut_info = total_mutual_info(condit_probabs, B_marginals_probabs; n=n)
         total_red_info = total_redundant_info(condit_probabs; n=n)
-        println("Total mutual info: ", total_mut_info)
-        println("Total redundant info: ", total_red_info)
-        println("Total info: ", total_mut_info - total_red_info)
+        #println("Total mutual info: ", total_mut_info)
+        #println("Total redundant info: ", total_red_info)
+        #println("Total info: ", total_mut_info - total_red_info)
         return total_mut_info - (total_red_info * (1/log(4)))
     end
 

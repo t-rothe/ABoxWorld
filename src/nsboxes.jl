@@ -78,7 +78,7 @@ module nsboxes
 
     function NSBox(scenario::NTuple{4, <:Int}, full_joint::Array{Float64,4}; unsafe=false)
         """ Alternative constructor for NSBox (more efficient representation) from a full joint distribution P(a,b|x,y) as a 4D array
-            
+                                    ]
             The full joint P(a,b|x,y) should be given as a 4D array with indices [a,b,x,y] and dimensions (m_A, m_B, M_A, M_B)
         """
 
@@ -87,7 +87,7 @@ module nsboxes
         !unsafe && (@assert all(size(full_joint) == (scenario[3], scenario[4], scenario[1], scenario[2])) "Scenario does not match dimensions of full joint distribution")
 
         #Check that both normalization and no-signaling constraints are fulfilled for the input for all (x,y) pairs:
-        #For no-signaling on maringals of B, we compare whhether the marginals P(b|x,y) are equal for all y for any x. 
+                    #For no-signaling on maringals of B, we compare whhether the marginals P(b|x,y) are equal for all y for any x. 
         full_A_marginals = sum(full_joint, dims=2)
         full_B_marginals = sum(full_joint, dims=1)
         

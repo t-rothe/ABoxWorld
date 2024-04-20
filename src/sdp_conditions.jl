@@ -17,7 +17,7 @@ module sdp_conditions
     #using ..QuantumNPA
     include("QuantumNPA/QuantumNPA.jl")
 
-    function is_in_NPA(FullNSJoint::Array{Float64,4}; level::Int=3, verbose=false)
+    function is_in_NPA(FullNSJoint::Array{Float64,4}; level::Union{String,Int}=3, verbose=false)
         Box = nsboxes.NSBox((2,2,2,2), FullNSJoint)
         PA = QuantumNPA.projector(1, 1:2, 1:2, full=true)
         PB = QuantumNPA.projector(2, 1:2, 1:2, full=true)

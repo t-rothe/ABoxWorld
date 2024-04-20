@@ -143,10 +143,10 @@ function extremal_wires(wire_types_A::NTuple{2, Symbol}, wire_params_A::NTuple{2
             wire_type, params = c_wire_types[i], c_wire_params[i]
             
             if wire_type == :D
-                f3 .= params[:α]
+                f3[i, :] .= params[:α]
             elseif wire_type == :O
-                f1 .= params[:α]
-                f2 .= params[:α]
+                f1[i, :] .= params[:α]
+                f2[i, :] .= params[:α]
                 if params[:β] == 0
                     for a1 in 0:1
                         f3[i,a1+1,:] .= (a1 ⊻ params[:γ])
@@ -157,16 +157,16 @@ function extremal_wires(wire_types_A::NTuple{2, Symbol}, wire_params_A::NTuple{2
                     end
                 end
             elseif wire_type == :X
-                f1 .= params[:α]
-                f2 .= params[:β]
+                f1[i, :] .= params[:α]
+                f2[i, :] .= params[:β]
                 for a2 in 0:1
                     for a1 in 0:1
                         f3[i,a1+1,a2+1] = (a1 ⊻ a2 ⊻ params[:γ])
                     end
                 end
             elseif wire_type == :A
-                f1 .= params[:α]
-                f2 .= params[:β]
+                f1[i, :] .= params[:α]
+                f2[i, :] .= params[:β]
                 for a2 in 0:1
                     for a1 in 0:1
                         f3[i,a1+1,a2+1] = ((a1 ⊻ params[:γ])*(a2 ⊻ params[:δ]) ⊻ params[:ε])
@@ -174,7 +174,7 @@ function extremal_wires(wire_types_A::NTuple{2, Symbol}, wire_params_A::NTuple{2
                 end
             elseif wire_type == :S
                 if params[:α] == 0
-                    f1 .= params[:β]
+                    f1[i, :] .= params[:β]
                     for a1 in 0:1
                         f2[i,a1+1] = (a1 ⊻ params[:γ])
                     end
@@ -185,9 +185,9 @@ function extremal_wires(wire_types_A::NTuple{2, Symbol}, wire_params_A::NTuple{2
                     end
                 else #α == 1
                     for a2 in 0:1
-                        f2[i,a2+1] = (a2 ⊻ params[:γ])
+                        f1[i,a2+1] = (a2 ⊻ params[:γ])
                     end
-                    f2 .= params[:β]
+                    f2[i, :] .= params[:β]
                     for a2 in 0:1
                         for a1 in 0:1
                             f3[i,a1+1,a2+1] = (a1 ⊻ (params[:δ]*a2) ⊻ params[:ε])
@@ -310,13 +310,17 @@ end
 
 #----- Individual wirings from the literature: -----
 
-function Allcock2009_wires() 
+function Allcock2009_wires_generator() 
     """x1 = x, x2 = x ⊕ a1 ⊕ 1, a = a1 ⊕ a2 ⊕ 1; 
         y1 = y, y2 = y*b1, b = b1 ⊕ b2 ⊕ 1 """
-    
-    c_wire_types_A, c_wire_params_A = (:S, :S), Tuple((α=0, β=x, γ=(1 ⊻ x), δ=1, ε=1) for x in 0:1)
-    c_wire_types_B, c_wire_params_B = (:X, :S), ((α=0, β=0, γ=1), (α=0, β=1, γ=0, δ=1, ε=1))
-    return extremal_wires(c_wire_types_A, c_wire_params_A, c_wire_types_B, c_wire_params_B)
+    return Channel() do ch
+        c_wire_types_A, c_wire_params_A = (:S, :S), Tuple((α=0, β=x, γ=(1 ⊻ x), δ=1, ε=1) for x in 0:1)
+        c_wire_types_B, c_wire_params_B = (:X, :S), ((α=0, β=0, γ=1), (α=0, β=1, γ=0, δ=1, ε=1))
+        put!(ch, (extremal_wires(c_wire_types_A, c_wire_params_A, c_wire_types_B, c_wire_params_B), (c_wire_types_A, c_wire_types_B), (c_wire_params_A, c_wire_params_B)))
+    end 
 end
 
-            
+function Allcock2009_wires()
+    wires, _, _ = first(Allcock2009_wires_generator())
+    return wires
+end

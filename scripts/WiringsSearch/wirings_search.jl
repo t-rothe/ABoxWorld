@@ -115,6 +115,18 @@ function is_NOT_in_Uffink(secondary_score_val::Real,CHSH_score_val::Real, Box1::
     #return conditions.check(Uffink_Bipartite_2222_Inequality(), MixedBox, :Q)
 end
 
+
+#is_NOT_in_RedundantIC(P::Array{Float64,4}) = !(conditions.check(Limited_RedundantInfo_IC_Bound(), P, :Q))
+is_NOT_in_RedundantIC(P::Array{Float64,4}) = !(conditions.check(RedundantInfo_IC_Bound(), P, :Q))
+
+function is_NOT_in_RedundantIC(secondary_score_val::Real,CHSH_score_val::Real, Box1::Array{Float64,4}, Box2::Array{Float64,4}, Box3::Array{Float64,4}, secondary_score::Function)
+    α, β, γ = Compute_Coeff(Box1, Box2, Box3, secondary_score_val, CHSH_score_val, secondary_score)
+    MixedBox = α*Box1 + β*Box2 + γ*Box3
+    
+    return is_NOT_in_RedundantIC(MixedBox)
+end
+
+
 # ----------------- #
 # ----------------- #
 
@@ -180,6 +192,7 @@ function uniform_extremal_wiring_search(initial_box::Array{Float64,4}, max_wirin
     
     for (w_i, (c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params)) in enumerate(wires_generator())
         #c_extremal_wires = extremal_wires_dict[(c_extremal_wiring_types[1], c_extremal_wiring_params_pair[1], c_extremal_wiring_types[2], c_extremal_wiring_params_pair[2])]
+        #@show c_extremal_wires, c_extremal_wiring_types, c_extremal_wiring_params
         IC_viol_wired_box, viol_wiring_order = find_uniformly_wired_sufficient_box_in_orbits(initial_box, c_extremal_wires, max_wiring_order, IC_violation_criterion)
         
         if !ismissing(IC_viol_wired_box)

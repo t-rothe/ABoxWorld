@@ -1,4 +1,6 @@
 # ABoxWorld
+A modular code framework for no-signaling boxes within device-independent "Box World" 
+
 To (locally) reproduce this project, do the following:
 
 0. Download this code base. Notice that raw data are typically not included in the
